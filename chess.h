@@ -252,8 +252,6 @@ typedef struct {
     u64 hash;           // hash of the current position, same as position_history[history_count - 1]
 } position_t;
 
-position_t position = { 0 };
-
 // Hashes of all positions of the current game or search
 #define MAX_HISTORY 4096
 u64 position_history[MAX_HISTORY];
@@ -1369,11 +1367,14 @@ void reset_position(position_t* pos){
     put_piece(pos, CBLACK, KING, 60);
 }
 
-void chess_reset(position_t* pos){
-    reset_position(pos);
-    // setup_board();
+void chess_setup(position_t* pos){
     setup_next_turn(pos);
     reset_history(pos);
+    // setup_board();
+}
+void chess_reset(position_t* pos){
+    reset_position(pos);
+    chess_setup(pos);
 }
 
 void fill_pseudo_legal_attacks_table(){
@@ -1447,7 +1448,7 @@ void fill_enpassant_affected_pawns_table(){
     }
 }
 
-void chess_init(){
+void chess_init(position_t* pos){
     fill_rays_table();
 
     fill_bishop_table();
@@ -1459,5 +1460,4 @@ void chess_init(){
     fill_enpassant_affected_pawns_table();
 
     init_zobrist();
-    chess_reset(&position);
 }

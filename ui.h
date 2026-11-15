@@ -900,16 +900,19 @@ void play_move(position_t* pos, i32 new_index, i32 arg){
     play_move_sound(pos, move);
 }
 
-void restart_game(position_t* pos){
+void setup_game(position_t* pos){
     game_state = GAME;
     arrows_count = 0;
     halfmoves_count = 0;
     halfmoves_at = 0;
     select_for_turn_highlight(NUL_INDEX, NUL_INDEX);
     deselect_piece();
-    chess_reset(pos);
     start_position = *pos;
-
+    chess_setup(pos);
+}
+void restart_game(position_t* pos){
+    reset_position(pos);
+    setup_game(pos);
 }
 
 void poll_events(position_t* pos){
@@ -1008,17 +1011,33 @@ void poll_events(position_t* pos){
     }
 
     if(IsKeyPressed(KEY_P)){
-        char* pgn = moves_to_pgn(pos, halfmoves, halfmoves_count);
-        SetClipboardText(pgn);
-        PlaySound(sounds[SOUND_NOTIFY]);
-        printf("PGN of current position: %s\n", pgn);
+        if(IsKeyDown(KEY_LEFT_SHIFT)){ // load instead if shift held shift
+            char* clipboard = (char*)GetClipboardText();
+            printf("Clipboard: <%s>\n", clipboard);
+            *pos = parse_pgn(clipboard);
+            setup_game(pos);
+            PlaySound(sounds[SOUND_GAME_START]);
+        }else{
+            char* pgn = moves_to_pgn(pos, halfmoves, halfmoves_count);
+            SetClipboardText(pgn);
+            PlaySound(sounds[SOUND_NOTIFY]);
+            printf("PGN of current position: %s\n", pgn);
+        }
     }
 
     if(IsKeyPressed(KEY_F)){
-        char* fen = position_to_fen(pos);
-        SetClipboardText(fen);
-        PlaySound(sounds[SOUND_NOTIFY]);
-        printf("FEN of current position: %s\n", fen);
+        if(IsKeyDown(KEY_LEFT_SHIFT)){ // load instead if shift held shift
+            char* clipboard = (char*)GetClipboardText();
+            printf("Clipboard: <%s>\n", clipboard);
+            *pos = parse_fen(clipboard);
+            setup_game(pos);
+            PlaySound(sounds[SOUND_GAME_START]);
+        }else{
+            char* fen = position_to_fen(pos);
+            SetClipboardText(fen);
+            PlaySound(sounds[SOUND_NOTIFY]);
+            printf("FEN of current position: %s\n", fen);
+        }
     }
 
     if(IsKeyPressed(KEY_T)){
@@ -1068,6 +1087,10 @@ void draw_position(position_t* pos){
 }
 
 void chess_run(){
+    position_t position = { 0 };
+    
+    chess_reset(&position);
+
     draw_init();
 
     restart_game(&position);

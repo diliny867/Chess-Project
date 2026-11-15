@@ -147,6 +147,12 @@ char* position_to_fen(position_t* pos){
     return fen_buffer;
 }
 
+i32 index_reverse_file(i32 index){
+    i32 rank = index / 8;
+    i32 file = index % 8;
+    i32 new_index = rank * 8 + (7 - file);
+    return new_index;
+}
 position_t parse_fen(char* fen){
     position_t pos = (position_t){ 0 };
     i32 written = 0;
@@ -156,8 +162,11 @@ position_t parse_fen(char* fen){
     i32 square_index = 63;
     for(; written < FEN_MAX; written++){
         char code = fen[written];
+        if(isdigit(code)){
+            square_index -= code - '0';
+            continue;
+        }
         if(code == '/'){
-            written++;
             continue;
         }
         if(code == ' ' || code == '\0'){
@@ -165,7 +174,7 @@ position_t parse_fen(char* fen){
         }
         bool black = false;
         piece_t piece = parse_piece_code(code, &black);
-        put_piece(&pos, black, piece, square_index--);
+        put_piece(&pos, black, piece, index_reverse_file(square_index--));
     }
 
     // Side to move
