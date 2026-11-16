@@ -153,16 +153,17 @@ i32 index_reverse_file(i32 index){
     i32 new_index = rank * 8 + (7 - file);
     return new_index;
 }
-position_t parse_fen(char* fen){
+// take func ptr, so ui can provide its own handle
+position_t parse_fen(char* fen, void(*put_piece_func)(position_t* pos, bool black, piece_t piece, i32 index)){
     position_t pos = (position_t){ 0 };
-    i32 written = 0;
+    i32 readen = 0;
 
     // Piece placement
-    written += measure_whitespace(fen + written);
+    readen += measure_whitespace(fen + readen);
     i32 square_index = 63;
-    for(; written < FEN_MAX; written++){
-        char code = fen[written];
-        if(isdigit(code)){
+    for(; readen < FEN_MAX; readen++){
+        char code = fen[readen];
+        if(code >= '1' && code <= '8'){
             square_index -= code - '0';
             continue;
         }
@@ -172,49 +173,68 @@ position_t parse_fen(char* fen){
         if(code == ' ' || code == '\0'){
             break;
         }
+
         bool black = false;
         piece_t piece = parse_piece_code(code, &black);
+        if(piece == EMPTY_PIECE){
+            break;
+        }
+        if(square_index < 0){ // oh no
+            square_index = -2;
+            break;
+        }
         put_piece(&pos, black, piece, index_reverse_file(square_index--));
     }
 
+    if(fen[readen] == '\0' || square_index >= 0){
+        if(square_index >= 0) chess_reset(&pos); // -1 if all read
+        return pos;
+    }
+
     // Side to move
-    written += measure_whitespace(fen + written);
-    pos.blacks_turn = fen[written++] == 'b';
+    readen += measure_whitespace(fen + readen);
+    if(fen[readen] == '\0') return pos;
+    pos.blacks_turn = fen[readen++] == 'b';
 
     // Castling ability
-    written += measure_whitespace(fen + written);
-    if(fen[written++] != '-'){
-        if(fen[written] != 'K'){
-            written++;
+    readen += measure_whitespace(fen + readen);
+    if(fen[readen] == '\0') return pos;
+    if(fen[readen++] != '-'){
+        if(fen[readen] != 'K'){
+            readen++;
             pos.lost_castling_rights[CWHITE][CASTLE_OO] = true;
         }
-        if(fen[written] != 'Q'){
-            written++;
+        if(fen[readen] != 'Q'){
+            readen++;
             pos.lost_castling_rights[CWHITE][CASTLE_OOO] = true;
         }
-        if(fen[written] != 'k'){
-            written++;
+        if(fen[readen] != 'k'){
+            readen++;
             pos.lost_castling_rights[CBLACK][CASTLE_OO] = true;
         }
-        if(fen[written] != 'q'){
-            written++;
+        if(fen[readen] != 'q'){
+            readen++;
             pos.lost_castling_rights[CBLACK][CASTLE_OOO] = true;
         }
     }
 
     // En passant target square
-    written += measure_whitespace(fen + written);
-    i32 file = fen[written++] - 'a';
-    i32 rank = fen[written++] - '1';
+    readen += measure_whitespace(fen + readen);
+    if(fen[readen] == '\0') return pos;
+
+    i32 file = fen[readen++] - 'a';
+    i32 rank = fen[readen++] - '1';
     pos.enpassantable = 1ull << (rank * 8 + file);
 
     // Halfmove clock
-    written += measure_whitespace(fen + written);
-    written += read_unsigned(fen + written, (u32*)&pos.halfmove_clock);
+    readen += measure_whitespace(fen + readen);
+    if(fen[readen] == '\0') return pos;
+    readen += read_unsigned(fen + readen, (u32*)&pos.halfmove_clock);
 
     // Fullmove counter
-    written += measure_whitespace(fen + written);
-    written += read_unsigned(fen + written, (u32*)&pos.turns_passed);
+    readen += measure_whitespace(fen + readen);
+    if(fen[readen] == '\0') return pos;
+    readen += read_unsigned(fen + readen, (u32*)&pos.turns_passed);
 
     return pos;
 };
@@ -360,7 +380,9 @@ piece_t pgn_to_piece(char pgn){
     default:  return PAWN;
     }
 }
-move_t pgn_build_move(char* pgn, i32 count, position_t* pos, bool black){
+move_t pgn_build_move(char* pgn, i32 count, position_t* pos, bool black, bool* error){
+    *error = false;
+
     if(count <= 0) return 0;
 
     i32 readen = 0;
@@ -368,21 +390,24 @@ move_t pgn_build_move(char* pgn, i32 count, position_t* pos, bool black){
     i32 from = 0;
     i32 to = 0;
     move_type_e move_type = MOVE;
-    piece_t piece = pgn_to_piece(pgn[readen]);
+    piece_t piece = PAWN;
     i32 spec1 = 0;
     i32 spec2 = 0;
 
     if(pgn[readen + 0] == 'O' && pgn[readen + 1] == '-' && pgn[readen + 2] == 'O'){
+        piece = KING;
         bool queenside = pgn[readen + 3] == '-' && pgn[readen + 4] == 'O';
         readen += queenside ? 5 : 3;
         from = black ? 60 : 4;
-        i32 advance = queenside ? -2 : 2;
-        to = from + advance;
-        spec1 = to + advance;
+        to = from + (queenside ? -2 : 2);
+        spec1 = to + (queenside ? -2 : 1);
         spec2 = (from + to) >> 1;
 
         return create_move(black, from, to, CASTLING, piece, spec1, spec2);
     }
+
+    piece = pgn_to_piece(pgn[readen]);
+    if(piece != PAWN) readen++;
 
     // first known square info
     i32 square1_file = -1;
@@ -425,24 +450,43 @@ move_t pgn_build_move(char* pgn, i32 count, position_t* pos, bool black){
     }
 
     // must be known by now
-    assert(bit_count(to_mask) == 1);
+    if(bit_count(to_mask) != 1){
+        *error = true;
+        return 0;
+    }
     to = mask_to_index(to_mask);
 
     // possible pieces to move
     u64 candidates = pos->pieces[piece] & pos->colors[black] & from_mask;
-    assert(candidates > 0); // must be some
+    if(candidates == 0){ // must be some
+        *error = true;
+        return 0;
+    }
+
     // check if move can be made
+    bool move_found = false;
     move_t moves[MAX_MOVES];
     while(candidates){
         i32 candidate_index = extract_piece(&candidates);
-        i32 count = fill_piece_legal_moves(pos, candidate_index, piece, moves, 0);
-        for(i32 i = 0; i < count; i++){ // check if can move to our square
-            if((i32)move_get_to(moves[i]) == to){
-                move_type = move_get_type(moves[i]);
+        i32 moves_count = fill_piece_legal_moves(pos, candidate_index, piece, moves, 0);
+        for(i32 i = 0; i < moves_count; i++){ // check if can move to our square
+            move_t move = moves[i];
+            if((i32)move_get_to(move) == to){
+                move_type = move_get_type(move);
                 from = candidate_index;
+                spec1 = move_get_spec1(move);
+                spec2 = move_get_spec2(move);
+                candidates = 0;
+                move_found = true;
                 break;
             }
         }
+    }
+
+    // didnt found a move, so code is incorrect
+    if(!move_found){
+        *error = true;
+        return 0;
     }
 
     if(pgn[readen] == '='){
@@ -459,16 +503,18 @@ move_t pgn_build_move(char* pgn, i32 count, position_t* pos, bool black){
 }
 i32 measure_next_text(char* pgn, i32 *text_length){
     i32 readen = 0;
-    readen += measure_whitespace(pgn);
+    readen += measure_whitespace(pgn + readen);
     i32 post_whitespace = readen;
-    readen += measure_nonwhitespace(pgn);
+    readen += measure_nonwhitespace(pgn + readen);
     if(text_length) *text_length = readen - post_whitespace;
     return readen;
 }
-i32 parse_pgn_play_next_move(char* pgn, position_t* pos){ // dont really validate it
+i32 parse_pgn_play_next_move(char* pgn, position_t* pos, void(*do_move_func)(position_t*, move_t), bool* error){
     i32 readen = 0;
 
-    readen += measure_next_text(pgn + readen, 0); // skip number with dot
+    readen += measure_whitespace(pgn + readen);
+    if(isdigit(pgn[readen])) // skip number with dot if present
+        readen += measure_next_text(pgn + readen, 0);
 
     i32 white_length, black_length, white_from, black_from;
     readen += measure_next_text(pgn + readen, &white_length);
@@ -476,20 +522,31 @@ i32 parse_pgn_play_next_move(char* pgn, position_t* pos){ // dont really validat
     readen += measure_next_text(pgn + readen, &black_length);
     black_from = readen - black_length;
 
-    if(white_length != 0){
-         do_move(pos, pgn_build_move(pgn + white_from, white_length, pos, false));
-        if(black_length != 0)
-            do_move(pos, pgn_build_move(pgn + black_from, black_length, pos, true));
+    if(white_length > 0){
+        move_t whites_move = pgn_build_move(pgn + white_from, white_length, pos, false, error);
+        if(*error) return readen;
+         do_move_func(pos, whites_move);
+        if(black_length > 0){
+            move_t blacks_move = pgn_build_move(pgn + black_from, black_length, pos, true, error);
+            if(*error) return readen;
+            do_move_func(pos, blacks_move);
+        }
     }
 
     return readen;
 }
-position_t parse_pgn(char* pgn){ // dont really validate it
+// take func ptr, so ui can provide its own handle
+position_t parse_pgn(char* pgn, void(*do_move_func)(position_t* pos, move_t move)){
     position_t pos = { 0 };
+    chess_reset(&pos);
 
     i32 readen = 0;
-    while(readen += parse_pgn_play_next_move(pgn, &pos))
-        ;
+    while(true){
+        bool error = false;
+        i32 move_length = parse_pgn_play_next_move(pgn + readen, &pos, do_move_func, &error);
+        if(move_length == 0 || error) break;
+        readen += move_length;
+    }
 
     return pos;
 }

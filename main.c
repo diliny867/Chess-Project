@@ -6,7 +6,7 @@
 int main(){
 
     chess_init();
-    chess_run();
+    chess_ui_run();
 
     return 0;
 }

@@ -177,7 +177,7 @@ u64 file_to_mask[8] = { FILE_A, FILE_B, FILE_C, FILE_D, FILE_E, FILE_F, FILE_G, 
 
 
 typedef enum {
-    MOVE = 1,
+    MOVE = 0, // need as 1 ?
     CAPTURE,
     PUSH,
     DOUBLE_PUSH,
@@ -1338,7 +1338,6 @@ void do_null_move(position_t* pos){
 }
 
 
-
 void reset_position(position_t* pos){
     *pos = (position_t){ 0 };
 
@@ -1448,7 +1447,7 @@ void fill_enpassant_affected_pawns_table(){
     }
 }
 
-void chess_init(position_t* pos){
+void chess_init(){
     fill_rays_table();
 
     fill_bishop_table();

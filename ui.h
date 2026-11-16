@@ -244,8 +244,7 @@ void play_move_sound(position_t* pos, move_t move){
     }
 }
 
-void after_halfmove(position_t* pos, i32 sound_offset){
-    play_move_sound(pos, halfmoves[halfmoves_at - sound_offset]);
+void after_halfmove(position_t* pos){
     if(halfmoves_at > 0) select_for_turn_highlight(halfmoves[halfmoves_at - 1]);
     else deselect_for_turn_highlight();
     deselect_piece();
@@ -253,8 +252,6 @@ void after_halfmove(position_t* pos, i32 sound_offset){
 void load_at_halfmove(position_t* pos, i32 halfmove){
     if(halfmoves_at < halfmoves_count || halfmove < halfmoves_count){
         *pos = start_position;
-
-        bool back = halfmove < halfmoves_at;
         if(halfmove > halfmoves_count) halfmove = halfmoves_count;
 
         for(i32 i = 0; i < halfmove; i++){
@@ -262,7 +259,7 @@ void load_at_halfmove(position_t* pos, i32 halfmove){
         }
 
         halfmoves_at = halfmove;
-        after_halfmove(pos, (back ? 0 : 1));
+        after_halfmove(pos);
 
     }
 }
@@ -271,8 +268,7 @@ void load_next_halfmove(position_t* pos){
         do_move(pos, halfmoves[halfmoves_at]);
         halfmoves_at++;
         if(halfmoves_at > halfmoves_count) halfmoves_at = halfmoves_count;
-
-        after_halfmove(pos, 1);
+        after_halfmove(pos);
     }
 }
 void load_previous_halfmove(position_t* pos){
@@ -284,11 +280,35 @@ void load_first_halfmove(position_t* pos){
     if(halfmoves_at > 0){
         *pos = start_position;
         halfmoves_at = 0;
-        after_halfmove(pos, 0);
+        after_halfmove(pos);
     }
 }
 void load_last_halfmove(position_t* pos){
     load_at_halfmove(pos, halfmoves_count);
+}
+void load_next_halfmove_sound(position_t* pos){
+    bool not_last = halfmoves_at < halfmoves_count;
+    load_next_halfmove(pos);
+    if(not_last)
+        play_move_sound(pos, halfmoves[halfmoves_at - 1]);
+}
+void load_previous_halfmove_sound(position_t* pos){
+    bool not_first = halfmoves_at > 0;
+    load_previous_halfmove(pos);
+    if(not_first)
+        play_move_sound(pos, halfmoves[halfmoves_at]);
+}
+void load_first_halfmove_sound(position_t* pos){
+    bool not_first = halfmoves_at > 0;
+    load_first_halfmove(pos);
+    if(not_first)
+        play_move_sound(pos, halfmoves[halfmoves_at]);
+}
+void load_last_halfmove_sound(position_t* pos){
+    bool not_last = halfmoves_at < halfmoves_count;
+    load_last_halfmove(pos);
+    if(not_last)
+        play_move_sound(pos, halfmoves[halfmoves_at - 1]);
 }
 
 bool mouse_is_over_board(){
@@ -602,6 +622,7 @@ void draw_played_turn_entry(position_t* pos, i32 x, i32 y, i32 width, i32 height
     // GuiDrawText(halfmove1, (Rectangle){ pgn_white_x_pos, pgn_white_y_pos, pgn_halfmove_text_max_width, height }, TEXT_ALIGN_CENTER, WHITE);
     if(GuiButton((Rectangle){ pgn_white_x_pos, pgn_white_y_pos, pgn_halfmove_text_max_width, height }, halfmove1_text) && game_state == GAME){
         load_at_halfmove(pos, halfmove + 1);
+        play_move_sound(pos, halfmoves[halfmove]);
     }
 
     i32 pgn_black_x_pos = pgn_white_x_pos + pgn_halfmove_text_max_width;
@@ -610,6 +631,7 @@ void draw_played_turn_entry(position_t* pos, i32 x, i32 y, i32 width, i32 height
         // GuiDrawText(halfmove2, (Rectangle){ pgn_black_x_pos, pgn_black_y_pos, pgn_halfmove_text_max_width, height }, TEXT_ALIGN_CENTER, WHITE);
         if(GuiButton((Rectangle){ pgn_black_x_pos, pgn_black_y_pos, pgn_halfmove_text_max_width, height }, halfmove2_text) && game_state == GAME){
             load_at_halfmove(pos, halfmove + 2);
+            play_move_sound(pos, halfmoves[halfmove + 1]);
         }
     }
 
@@ -697,16 +719,16 @@ void draw_controls(position_t* pos){
 
     GuiSetIconScale(buttons_scale);
     if(GuiIconButtonActivatable((Rectangle){ buttons_x_pos, SCREEN_BOARD_SIZE - buttons_y_bottom_offset, buttons_size, buttons_size }, ICON_PLAYER_PREVIOUS, true) && game_state == GAME){
-        load_first_halfmove(pos);
+        load_first_halfmove_sound(pos);
     }
     if(GuiIconButtonActivatable((Rectangle){ buttons_x_pos + buttons_x_advance, SCREEN_BOARD_SIZE - buttons_y_bottom_offset, buttons_size, buttons_size }, ICON_UNDO, true) && game_state == GAME){
-        load_previous_halfmove(pos);
+        load_previous_halfmove_sound(pos);
     }
     if(GuiIconButtonActivatable((Rectangle){ buttons_x_pos + buttons_x_advance*2, SCREEN_BOARD_SIZE - buttons_y_bottom_offset, buttons_size, buttons_size }, ICON_REDO, true) && game_state == GAME){
         load_next_halfmove(pos);
     }
     if(GuiIconButtonActivatable((Rectangle){ buttons_x_pos + buttons_x_advance*3, SCREEN_BOARD_SIZE - buttons_y_bottom_offset, buttons_size, buttons_size }, ICON_PLAYER_NEXT, true) && game_state == GAME){
-        load_last_halfmove(pos);
+        load_last_halfmove_sound(pos);
     }
 }
 void draw_menu(position_t* pos){
@@ -903,16 +925,28 @@ void play_move(position_t* pos, i32 new_index, i32 arg){
 void setup_game(position_t* pos){
     game_state = GAME;
     arrows_count = 0;
-    halfmoves_count = 0;
-    halfmoves_at = 0;
     select_for_turn_highlight(NUL_INDEX, NUL_INDEX);
     deselect_piece();
     start_position = *pos;
     chess_setup(pos);
 }
+void clear_halfmoves(){
+    halfmoves_count = 0;
+    halfmoves_at = 0;
+}
 void restart_game(position_t* pos){
     reset_position(pos);
+    clear_halfmoves();
     setup_game(pos);
+}
+
+void ui_put_piece(position_t* pos, bool black, piece_t piece, i32 index){
+    put_piece(pos, black, piece, index);
+}
+void ui_do_move(position_t* pos, move_t move){
+    // before doing the move
+    save_halfmove(pos, move);
+    do_move(pos, move);
 }
 
 void poll_events(position_t* pos){
@@ -993,16 +1027,16 @@ void poll_events(position_t* pos){
     }
 
     if(IsKeyPressed(KEY_DOWN)){
-        load_first_halfmove(pos);
+        load_first_halfmove_sound(pos);
     }
-    if(IsKeyPressed(KEY_LEFT)){
-        load_previous_halfmove(pos);
+    if(IsKeyPressed(KEY_LEFT) || IsKeyPressedRepeat(KEY_LEFT)){
+        load_previous_halfmove_sound(pos);
     }
-    if(IsKeyPressed(KEY_RIGHT)){
-        load_next_halfmove(pos);
+    if(IsKeyPressed(KEY_RIGHT) || IsKeyPressedRepeat(KEY_RIGHT)){
+        load_next_halfmove_sound(pos);
     }
     if(IsKeyPressed(KEY_UP)){
-        load_last_halfmove(pos);
+        load_last_halfmove_sound(pos);
     }
 
     if(IsKeyPressed(KEY_M)){
@@ -1014,8 +1048,10 @@ void poll_events(position_t* pos){
         if(IsKeyDown(KEY_LEFT_SHIFT)){ // load instead if shift held shift
             char* clipboard = (char*)GetClipboardText();
             printf("Clipboard: <%s>\n", clipboard);
-            *pos = parse_pgn(clipboard);
-            setup_game(pos);
+            restart_game(pos);
+            *pos = parse_pgn(clipboard, ui_do_move);
+            if(halfmoves_at > 0)
+                select_for_turn_highlight(halfmoves[halfmoves_at - 1]);
             PlaySound(sounds[SOUND_GAME_START]);
         }else{
             char* pgn = moves_to_pgn(pos, halfmoves, halfmoves_count);
@@ -1029,7 +1065,8 @@ void poll_events(position_t* pos){
         if(IsKeyDown(KEY_LEFT_SHIFT)){ // load instead if shift held shift
             char* clipboard = (char*)GetClipboardText();
             printf("Clipboard: <%s>\n", clipboard);
-            *pos = parse_fen(clipboard);
+            clear_halfmoves();
+            *pos = parse_fen(clipboard, ui_put_piece);
             setup_game(pos);
             PlaySound(sounds[SOUND_GAME_START]);
         }else{
@@ -1086,9 +1123,9 @@ void draw_position(position_t* pos){
     EndDrawing();
 }
 
-void chess_run(){
+void chess_ui_run(){
     position_t position = { 0 };
-    
+
     chess_reset(&position);
 
     draw_init();
