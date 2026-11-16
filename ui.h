@@ -148,14 +148,14 @@ void load_assets(){
     piece_textures[CWHITE][KING]   = load_texture("resources/white-king.png");
     piece_textures[CBLACK][KING]   = load_texture("resources/black-king.png");
 
-    sounds[SOUND_NOTIFY] = LoadSound("resources/notify.mp3");
-    sounds[SOUND_MOVE] = LoadSound("resources/move-self.mp3");
-    sounds[SOUND_CHECK] = LoadSound("resources/move-check.mp3");
-    sounds[SOUND_CAPTURE] = LoadSound("resources/capture.mp3");
-    sounds[SOUND_PROMOTION] = LoadSound("resources/promote.mp3");
-    sounds[SOUND_CASTLING] = LoadSound("resources/castle.mp3");
+    sounds[SOUND_NOTIFY]     = LoadSound("resources/notify.mp3");
+    sounds[SOUND_MOVE]       = LoadSound("resources/move-self.mp3");
+    sounds[SOUND_CHECK]      = LoadSound("resources/move-check.mp3");
+    sounds[SOUND_CAPTURE]    = LoadSound("resources/capture.mp3");
+    sounds[SOUND_PROMOTION]  = LoadSound("resources/promote.mp3");
+    sounds[SOUND_CASTLING]   = LoadSound("resources/castle.mp3");
     sounds[SOUND_GAME_START] = LoadSound("resources/game-start.mp3");
-    sounds[SOUND_GAME_END] = LoadSound("resources/game-end.mp3");
+    sounds[SOUND_GAME_END]   = LoadSound("resources/game-end.mp3");
 }
 
 i32 maxv(i32 a, i32 b){
@@ -725,7 +725,7 @@ void draw_controls(position_t* pos){
         load_previous_halfmove_sound(pos);
     }
     if(GuiIconButtonActivatable((Rectangle){ buttons_x_pos + buttons_x_advance*2, SCREEN_BOARD_SIZE - buttons_y_bottom_offset, buttons_size, buttons_size }, ICON_REDO, true) && game_state == GAME){
-        load_next_halfmove(pos);
+        load_next_halfmove_sound(pos);
     }
     if(GuiIconButtonActivatable((Rectangle){ buttons_x_pos + buttons_x_advance*3, SCREEN_BOARD_SIZE - buttons_y_bottom_offset, buttons_size, buttons_size }, ICON_PLAYER_NEXT, true) && game_state == GAME){
         load_last_halfmove_sound(pos);

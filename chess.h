@@ -239,21 +239,20 @@ typedef struct {
     u64 all_pseudo_attacks;
     bool lost_castling_rights[CCOLOR_COUNT][2];
     u64 enpassantable;
-    // u64 enpassantable[CCOLOR_COUNT];
     u64 pinneds[CCOLOR_COUNT];
     u64 pinned_masks[CCOLOR_COUNT];
     u64 checkers;
     u64 check_mask;
     i32 turns_passed;
     bool blacks_turn;
-    bool full_setup_pending; // pins and enemy attacks not calculated yet, see do_move_lazy / ensure_setup
-    i32 halfmove_clock; // 50 move rule
-    i32 history_count;  // number of entries of position_history that belong to this position
-    u64 hash;           // hash of the current position, same as position_history[history_count - 1]
+    bool full_setup_pending; // pins and enemy attacks not calculated yet, see do_move_lazy and ensure_setup
+    i32 halfmove_clock;      // 50 move rule
+    i32 history_count;       // number of entries of position_history that belong to this position
+    u64 hash;                // hash of the current position, same as position_history[history_count - 1]
 } position_t;
 
 // Hashes of all positions of the current game or search
-#define MAX_HISTORY 4096
+#define MAX_HISTORY 20000
 u64 position_history[MAX_HISTORY];
 
 u64 zobrist_pieces[CCOLOR_COUNT][PIECE_MAX][64];
@@ -912,16 +911,6 @@ static force_inline u64 enpassant_target(position_t* pos, bool black, i32 from, 
         if(attackers_to(pos, black, king_index(pos, black), board) & ~captured) return 0;
     }
     return enpassantable;
-    // u64 enpassantable = pos->enpassantable[!black];
-    // if(!enpassantable || !(pawns_attack(black, 1ull << from) & enpassantable)) return 0;
-    // if(legal){
-    //     // simulate the capture to check if possible
-    //     i32 to = mask_to_index(enpassantable);
-    //     u64 captured = 1ull << (to + (black ? 8 : -8));
-    //     u64 board = (pos->all_pieces ^ (1ull << from) ^ captured) | enpassantable;
-    //     if(attackers_to(pos, black, king_index(pos, black), board) & ~captured) return 0;
-    // }
-    // return enpassantable;
 }
 
 static i32 add_promotions(move_t* moves, i32 count, bool black, i32 from, i32 to, i32 captured){
@@ -931,16 +920,6 @@ static i32 add_promotions(move_t* moves, i32 count, bool black, i32 from, i32 to
     moves[count++] = create_move(black, from, to, PROMOTION, PAWN, BISHOP, captured);
     return count;
 }
-
-// static force_inline piece_t victim_at(position_t* pos, u64 to_mask){
-//     u64* pieces = pos->pieces;
-//     if(pieces[PAWN]   & to_mask) return PAWN;
-//     if(pieces[KNIGHT] & to_mask) return KNIGHT;
-//     if(pieces[BISHOP] & to_mask) return BISHOP;
-//     if(pieces[ROOK]   & to_mask) return ROOK;
-//     if(pieces[QUEEN]  & to_mask) return QUEEN;
-//     return KING;
-// }
 
 // captures_only: captures, en passant and promotions, used by quiescence search
 static force_inline i32 fill_piece_moves(position_t* pos, i32 from, piece_t piece, move_t* moves, i32 move_count, bool legal, bool captures_only){
@@ -993,8 +972,6 @@ static force_inline i32 fill_piece_moves(position_t* pos, i32 from, piece_t piec
                 to = mask_to_index(mask);
                 i32 rook_from = (type == CASTLE_OOO) ? to - 2 : to + 1;
                 i32 rook_to   = (from + to) >> 1;
-                // i32 rook_from = mask_to_index(castle_rook_from[black][type]);
-                // i32 rook_to   = (type == CASTLE_OOO) ? from - 1 : from + 1;
                 moves[move_count++] = create_move(black, from, to, CASTLING, piece, rook_from, rook_to);
             }
         }
@@ -1159,7 +1136,6 @@ u64 calculate_hash(position_t* pos){
     if(pos->blacks_turn) hash ^= zobrist_side;
     hash ^= zobrist_castling[castling_index(pos)];
     u64 enpassant = pos->enpassantable;
-    // u64 enpassant = pos->enpassantable[CWHITE] | pos->enpassantable[CBLACK];
     if(enpassant) hash ^= zobrist_enpassant[mask_to_index(enpassant)];
     return hash;
 }
@@ -1239,10 +1215,6 @@ void do_move_lazy(position_t* pos, move_t move){
 
     if(pos->enpassantable) hash ^= zobrist_enpassant[mask_to_index(pos->enpassantable)];
     pos->enpassantable = 0;
-    // u64 old_enpassant = pos->enpassantable[CWHITE] | pos->enpassantable[CBLACK];
-    // if(old_enpassant) hash ^= zobrist_enpassant[mask_to_index(old_enpassant)];
-    // pos->enpassantable[CWHITE] = 0;
-    // pos->enpassantable[CBLACK] = 0;
 
     if(to_mask & colors[!black]){ // capture
         piece_t victim = pieces_in_squares[to]; // equivalent to piece_at(pos, to)
@@ -1273,7 +1245,6 @@ void do_move_lazy(position_t* pos, move_t move){
     case DOUBLE_PUSH: {
         i32 enpassant = move_get_spec1(move);
         pos->enpassantable = 1ull << enpassant;
-        // pos->enpassantable[black] = 1ull << enpassant;
         pos->hash ^= zobrist_enpassant[enpassant];
     } break;
     case ENPASSANT: {
@@ -1320,11 +1291,6 @@ void do_null_move(position_t* pos){
     pos->hash ^= zobrist_side;
     if(pos->enpassantable) pos->hash ^= zobrist_enpassant[mask_to_index(pos->enpassantable)];
     pos->enpassantable = 0;
-    // u64 old_enpassant = pos->enpassantable[CWHITE] | pos->enpassantable[CBLACK];
-    // pos->hash ^= zobrist_side;
-    // if(old_enpassant) pos->hash ^= zobrist_enpassant[mask_to_index(old_enpassant)];
-    // pos->enpassantable[CWHITE] = 0;
-    // pos->enpassantable[CBLACK] = 0;
 
     pos->blacks_turn = !pos->blacks_turn;
     pos->halfmove_clock = 0;

@@ -7,7 +7,7 @@
 
 char fen_piece_codes[CCOLOR_COUNT][PIECE_MAX] = { { ' ', 'P', 'N', 'B', 'R', 'Q', 'K'}, {' ', 'p', 'n', 'b', 'r', 'q', 'k'} };
 
-piece_t parse_piece_code(char code, bool *black){
+piece_t parse_piece_fen_code(char code, bool *black){
     if(code == 'P'){ if(black) *black = false; return PAWN; }
     if(code == 'N'){ if(black) *black = false; return KNIGHT; }
     if(code == 'B'){ if(black) *black = false; return BISHOP; }
@@ -63,6 +63,13 @@ i32 measure_nonwhitespace(char* str){
     i32 i = 0;
     while(isgraph(str[i])) i++;
     return i;
+}
+
+bool is_file_char(char c){
+    return c >= 'a' && c <= 'h';
+}
+bool is_rank_char(char c){
+    return c >= '1' && c <= '8';
 }
 
 #define FEN_MAX 100
@@ -160,10 +167,10 @@ position_t parse_fen(char* fen, void(*put_piece_func)(position_t* pos, bool blac
 
     // Piece placement
     readen += measure_whitespace(fen + readen);
-    i32 square_index = 63;
+    i32 square_index = 64;
     for(; readen < FEN_MAX; readen++){
         char code = fen[readen];
-        if(code >= '1' && code <= '8'){
+        if(is_rank_char(code)){
             square_index -= code - '0';
             continue;
         }
@@ -175,65 +182,66 @@ position_t parse_fen(char* fen, void(*put_piece_func)(position_t* pos, bool blac
         }
 
         bool black = false;
-        piece_t piece = parse_piece_code(code, &black);
+        piece_t piece = parse_piece_fen_code(code, &black);
         if(piece == EMPTY_PIECE){
             break;
         }
-        if(square_index < 0){ // oh no
-            square_index = -2;
+        if(square_index == 0){ // oh no
+            square_index = 999;
             break;
         }
-        put_piece(&pos, black, piece, index_reverse_file(square_index--));
+        put_piece(&pos, black, piece, index_reverse_file(--square_index));
     }
 
-    if(fen[readen] == '\0' || square_index >= 0){
-        if(square_index >= 0) chess_reset(&pos); // -1 if all read
+    if(fen[readen] == '\0' || square_index > 0){
+        if(square_index > 0) chess_reset(&pos); // 0 if all read
         return pos;
     }
 
     // Side to move
     readen += measure_whitespace(fen + readen);
-    if(fen[readen] == '\0') return pos;
+    if(fen[readen] != 'w' || fen[readen] != 'b') return pos;
     pos.blacks_turn = fen[readen++] == 'b';
 
     // Castling ability
     readen += measure_whitespace(fen + readen);
     if(fen[readen] == '\0') return pos;
-    if(fen[readen++] != '-'){
-        if(fen[readen] != 'K'){
+    pos.lost_castling_rights[CWHITE][CASTLE_OO]  = true;
+    pos.lost_castling_rights[CWHITE][CASTLE_OOO] = true;
+    pos.lost_castling_rights[CBLACK][CASTLE_OO]  = true;
+    pos.lost_castling_rights[CBLACK][CASTLE_OOO] = true;
+    if(fen[readen] == '-'){
+        readen++;
+    }else{
+        while(isalpha(fen[readen])){
+            if      (fen[readen] == 'K'){
+                pos.lost_castling_rights[CWHITE][CASTLE_OO] = false;
+            }else if(fen[readen] == 'Q'){
+                pos.lost_castling_rights[CWHITE][CASTLE_OOO] = false;
+            }else if(fen[readen] == 'k'){
+                pos.lost_castling_rights[CBLACK][CASTLE_OO] = false;
+            }else if(fen[readen] == 'q'){
+                pos.lost_castling_rights[CBLACK][CASTLE_OOO] = false;
+            }
             readen++;
-            pos.lost_castling_rights[CWHITE][CASTLE_OO] = true;
-        }
-        if(fen[readen] != 'Q'){
-            readen++;
-            pos.lost_castling_rights[CWHITE][CASTLE_OOO] = true;
-        }
-        if(fen[readen] != 'k'){
-            readen++;
-            pos.lost_castling_rights[CBLACK][CASTLE_OO] = true;
-        }
-        if(fen[readen] != 'q'){
-            readen++;
-            pos.lost_castling_rights[CBLACK][CASTLE_OOO] = true;
         }
     }
 
     // En passant target square
     readen += measure_whitespace(fen + readen);
-    if(fen[readen] == '\0') return pos;
-
+    if(!is_file_char(fen[readen]) || !is_rank_char(fen[readen + 1])) return pos;
     i32 file = fen[readen++] - 'a';
     i32 rank = fen[readen++] - '1';
     pos.enpassantable = 1ull << (rank * 8 + file);
 
     // Halfmove clock
     readen += measure_whitespace(fen + readen);
-    if(fen[readen] == '\0') return pos;
+    if(!isdigit(fen[readen])) return pos;
     readen += read_unsigned(fen + readen, (u32*)&pos.halfmove_clock);
 
     // Fullmove counter
     readen += measure_whitespace(fen + readen);
-    if(fen[readen] == '\0') return pos;
+    if(!isdigit(fen[readen])) return pos;
     readen += read_unsigned(fen + readen, (u32*)&pos.turns_passed);
 
     return pos;
@@ -363,12 +371,6 @@ char* moves_to_pgn(position_t* pos, move_t* halfmoves, i32 count){
     return pgn_buffer;
 }
 
-bool is_file_char(char c){
-    return c >= 'a' && c <= 'h';
-}
-bool is_rank_char(char c){
-    return c >= '1' && c <= '8';
-}
 piece_t pgn_to_piece(char pgn){
     switch(pgn){
     case 'N': return KNIGHT;
@@ -381,9 +383,12 @@ piece_t pgn_to_piece(char pgn){
     }
 }
 move_t pgn_build_move(char* pgn, i32 count, position_t* pos, bool black, bool* error){
-    *error = false;
+    if(count <= 0){
+        *error = true;
+        return 0;
+    }
 
-    if(count <= 0) return 0;
+    *error = false;
 
     i32 readen = 0;
 
