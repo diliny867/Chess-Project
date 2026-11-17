@@ -5648,9 +5648,21 @@ static void GuiDrawText(const char *text, Rectangle textBounds, int alignment, C
         if (iconId >= 0)
         {
             // NOTE: Considering icon height, probably different than text size
-            GuiDrawIcon(iconId, (int)textBoundsPosition.x, (int)(textBounds.y + textBounds.height/2 - RAYGUI_ICON_SIZE*guiIconScale/2 + TEXT_VALIGN_PIXEL_OFFSET(textBounds.height)), guiIconScale, tint);
+            int iconX = (int)textBoundsPosition.x;
+            int iconY = (int)(textBounds.y - RAYGUI_ICON_SIZE*guiIconScale/2 + TEXT_VALIGN_PIXEL_OFFSET(textBounds.height));
+            switch (alignmentVertical){
+                case TEXT_ALIGN_TOP: break;
+                case TEXT_ALIGN_MIDDLE: iconY += textBounds.height/2; break;
+                case TEXT_ALIGN_BOTTOM: iconY += textBounds.height; break;
+                default: break;
+            }
+            GuiDrawIcon(iconId, iconX, iconY, guiIconScale, tint);
             textBoundsPosition.x += (float)(RAYGUI_ICON_SIZE*guiIconScale + RAYGUI_ICON_TEXT_PADDING);
             textBoundsWidthOffset = (float)(RAYGUI_ICON_SIZE*guiIconScale + RAYGUI_ICON_TEXT_PADDING);
+
+            // GuiDrawIcon(iconId, (int)textBoundsPosition.x, (int)(textBounds.y + textBounds.height/2 - RAYGUI_ICON_SIZE*guiIconScale/2 + TEXT_VALIGN_PIXEL_OFFSET(textBounds.height)), guiIconScale, tint);
+            // textBoundsPosition.x += (float)(RAYGUI_ICON_SIZE*guiIconScale + RAYGUI_ICON_TEXT_PADDING);
+            // textBoundsWidthOffset = (float)(RAYGUI_ICON_SIZE*guiIconScale + RAYGUI_ICON_TEXT_PADDING);
         }
 #endif
         // Get size in bytes of text, considering end of line and line break

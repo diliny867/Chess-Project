@@ -154,6 +154,11 @@ char* position_to_fen(position_t* pos){
     return fen_buffer;
 }
 
+position_t finish_pos(position_t* pos){
+    setup_position(pos);
+    return *pos;
+}
+
 i32 index_reverse_file(i32 index){
     i32 rank = index / 8;
     i32 file = index % 8;
@@ -195,17 +200,17 @@ position_t parse_fen(char* fen, void(*put_piece_func)(position_t* pos, bool blac
 
     if(fen[readen] == '\0' || square_index > 0){
         if(square_index > 0) chess_reset(&pos); // 0 if all read
-        return pos;
+        return finish_pos(&pos);
     }
 
     // Side to move
     readen += measure_whitespace(fen + readen);
-    if(fen[readen] != 'w' || fen[readen] != 'b') return pos;
+    if(fen[readen] != 'w' && fen[readen] != 'b') return finish_pos(&pos);
     pos.blacks_turn = fen[readen++] == 'b';
 
     // Castling ability
     readen += measure_whitespace(fen + readen);
-    if(fen[readen] == '\0') return pos;
+    if(fen[readen] == '\0') return finish_pos(&pos);
     pos.lost_castling_rights[CWHITE][CASTLE_OO]  = true;
     pos.lost_castling_rights[CWHITE][CASTLE_OOO] = true;
     pos.lost_castling_rights[CBLACK][CASTLE_OO]  = true;
@@ -229,22 +234,22 @@ position_t parse_fen(char* fen, void(*put_piece_func)(position_t* pos, bool blac
 
     // En passant target square
     readen += measure_whitespace(fen + readen);
-    if(!is_file_char(fen[readen]) || !is_rank_char(fen[readen + 1])) return pos;
+    if(!is_file_char(fen[readen]) || !is_rank_char(fen[readen + 1])) return finish_pos(&pos);
     i32 file = fen[readen++] - 'a';
     i32 rank = fen[readen++] - '1';
     pos.enpassantable = 1ull << (rank * 8 + file);
 
     // Halfmove clock
     readen += measure_whitespace(fen + readen);
-    if(!isdigit(fen[readen])) return pos;
+    if(!isdigit(fen[readen])) return finish_pos(&pos);
     readen += read_unsigned(fen + readen, (u32*)&pos.halfmove_clock);
 
     // Fullmove counter
     readen += measure_whitespace(fen + readen);
-    if(!isdigit(fen[readen])) return pos;
+    if(!isdigit(fen[readen])) return finish_pos(&pos);
     readen += read_unsigned(fen + readen, (u32*)&pos.turns_passed);
 
-    return pos;
+    return finish_pos(&pos);
 };
 
 
@@ -328,6 +333,7 @@ i32 write_move_pgn(char* buf, position_t* pos, move_t move){
             if(other_rank == rank) write_file = true;
             if(other_file == file) write_rank = true;
         }
+        if(!write_file && !write_rank) write_file = true; // other piece can capture, so we definitely write something
     }
     i32 out_from_string_count = 0;
     if(write_file) out_from_string[out_from_string_count++] = 'a' + file;
@@ -553,5 +559,5 @@ position_t parse_pgn(char* pgn, void(*do_move_func)(position_t* pos, move_t move
         readen += move_length;
     }
 
-    return pos;
+    return finish_pos(&pos);
 }

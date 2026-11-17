@@ -42,6 +42,7 @@ bool doing_arrow = false;
 
 i32 evaluation_bar = 0;
 i32 engine_active = 0;
+char best_move_pgn[10] = { 0 };
 
 Rectangle played_turns_panel_view = { 0 };
 Vector2 played_turns_panel_scroll = { 0 };
@@ -244,14 +245,21 @@ void play_move_sound(position_t* pos, move_t move){
     }
 }
 
+void load_start_position(position_t* pos){
+    *pos = start_position;
+    setup_position(pos);
+}
+
 void after_halfmove(position_t* pos){
     if(halfmoves_at > 0) select_for_turn_highlight(halfmoves[halfmoves_at - 1]);
     else deselect_for_turn_highlight();
     deselect_piece();
+
 }
 void load_at_halfmove(position_t* pos, i32 halfmove){
     if(halfmoves_at < halfmoves_count || halfmove < halfmoves_count){
-        *pos = start_position;
+        load_start_position(pos);
+
         if(halfmove > halfmoves_count) halfmove = halfmoves_count;
 
         for(i32 i = 0; i < halfmove; i++){
@@ -260,7 +268,6 @@ void load_at_halfmove(position_t* pos, i32 halfmove){
 
         halfmoves_at = halfmove;
         after_halfmove(pos);
-
     }
 }
 void load_next_halfmove(position_t* pos){
@@ -278,7 +285,8 @@ void load_previous_halfmove(position_t* pos){
 }
 void load_first_halfmove(position_t* pos){
     if(halfmoves_at > 0){
-        *pos = start_position;
+        load_start_position(pos);
+
         halfmoves_at = 0;
         after_halfmove(pos);
     }
@@ -469,7 +477,7 @@ void draw_end_screen(position_t* pos){
 }
 
 
-void menu_init(){
+void init_menu(){
     GuiSetStyle(BUTTON, BASE_COLOR_DISABLED,   0xa8a8a8ff);
     GuiSetStyle(BUTTON, BORDER_COLOR_DISABLED, 0x8a8a8aff);
     GuiSetStyle(BUTTON, TEXT_COLOR_DISABLED,   0x7a7a7aff);
@@ -515,6 +523,17 @@ i32 GuiIconButtonActivatable(Rectangle bounds, i32 icon, bool active){
     return ret;
 }
 
+i32 pgn_to_icon_id(char pgn){
+    switch(pgn){
+    case 'N': return ICON_KNIGHT;
+    case 'B': return ICON_BISHOP;
+    case 'R': return ICON_ROOK;
+    case 'Q': return ICON_QUEEN;
+    case 'K': return ICON_KING;
+    case 'O': return ICON_CASTLING;
+    default:  return ICON_PAWN;
+    }
+}
 // https://lichess.org/page/accuracy
 f32 calculate_eval_white_percent(i32 eval){
     return 0.5f + 0.5f * (2.f / (1.f + exp(-0.00368208f * eval)) - 1.f);
@@ -541,8 +560,30 @@ void draw_eval_bar(){
     f32 eval_number = evaluation_bar / 100.f;
 
     i32 eval_number_x_pos = SCREEN_BOARD_SIZE + SCREEN_EVAL_WIDTH + 10;
+    i32 eval_number_y_pos = eval_y_offset + 4;
     i32 font_size = 30;
-    DrawText(TextFormat("%c%.1f", (eval_number >= 0) ? '+' : '-', fabsf(eval_number)), eval_number_x_pos, eval_y_offset + 4, font_size, EVAL_WHITE);
+    const char* eval_text;
+    if(evaluation_bar >= MATE_VALUE/2 || evaluation_bar <= -MATE_VALUE/2){
+        eval_text = "M";
+    }else{
+        eval_text = TextFormat("%c%.1f", (eval_number >= 0) ? '+' : '-', fabsf(eval_number));
+    }
+    DrawText(eval_text, eval_number_x_pos, eval_number_y_pos, font_size, EVAL_WHITE);
+
+    i32 old_text_size = GuiGetStyle(DEFAULT, TEXT_SIZE);
+    i32 best_move_font_size = 20;
+    i32 best_move_x_pos = eval_number_x_pos + 120; // SCREEN_BOARD_SIZE + SCREEN_EVAL_WIDTH + 50;
+    i32 best_move_y_pos = eval_number_y_pos + font_size - best_move_font_size + 2; // 74;
+    char best_move_text[20] = { 0 };
+    i32 icon_id = pgn_to_icon_id(best_move_pgn[0]);
+    i32 advance = icon_id != ICON_NONE && icon_id != ICON_PAWN && icon_id != ICON_CASTLING ? 1 : 0;
+    strcpy(best_move_text, GuiIconText(icon_id, best_move_pgn + advance));
+    if(best_move_pgn[0] != '\0'){ // turn exists
+        GuiSetStyle(DEFAULT, TEXT_SIZE, best_move_font_size);
+        GuiDrawText(best_move_text, (Rectangle){ best_move_x_pos, best_move_y_pos, 999, 0 }, TEXT_ALIGN_LEFT, EVAL_WHITE);
+        GuiSetStyle(DEFAULT, TEXT_SIZE, old_text_size);
+    }
+    // DrawText(best_move_text, best_move_x_pos, best_move_y_pos, best_move_font_size, EVAL_WHITE);
 }
 void draw_eval(){
     if(engine_active){
@@ -555,17 +596,6 @@ void draw_eval(){
     // GuiSetStyle(SLIDER, SLIDER_PADDING, 2);
     // GuiToggleSlider((Rectangle){ 900, 480 + 20, 140, 30 }, "ON;OFF", &engine_active);
     // GuiSetStyle(SLIDER, SLIDER_PADDING, 0);
-}
-i32 pgn_to_icon_id(char pgn){
-    switch(pgn){
-    case 'N': return ICON_KNIGHT;
-    case 'B': return ICON_BISHOP;
-    case 'R': return ICON_ROOK;
-    case 'Q': return ICON_QUEEN;
-    case 'K': return ICON_KING;
-    case 'O': return ICON_CASTLING;
-    default:  return ICON_PAWN;
-    }
 }
 void draw_played_turn_entry(position_t* pos, i32 x, i32 y, i32 width, i32 height, i32 halfmove, bool show_pieces_as_icons){
     char* halfmove1 = halfmoves_pgn[halfmove];
@@ -659,7 +689,7 @@ void draw_played_turns(position_t* pos){
     i32 panel_width = 280;
     i32 panel_height = 540;
     i32 panel_x_pos = SCREEN_BOARD_SIZE + SCREEN_EVAL_WIDTH + (SCREEN_CONTROLS_WIDTH - panel_width) / 2;
-    i32 panel_y_pos = 100;
+    i32 panel_y_pos = 110;
     Rectangle panel_rec = (Rectangle){ panel_x_pos, panel_y_pos, panel_width, panel_height };
 
     i32 background_color = GuiGetStyle(DEFAULT, BACKGROUND_COLOR);
@@ -740,7 +770,7 @@ void draw_menu(position_t* pos){
 }
 
 
-void draw_init(){
+void init_draw(){
     SetConfigFlags(FLAG_MSAA_4X_HINT);
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Chess");
 
@@ -759,7 +789,7 @@ void draw_init(){
     }
 
     draw_board_to_texture();
-    menu_init();
+    init_menu();
 }
 
 void clean_draw(){
@@ -928,11 +958,17 @@ void setup_game(position_t* pos){
     select_for_turn_highlight(NUL_INDEX, NUL_INDEX);
     deselect_piece();
     start_position = *pos;
-    chess_setup(pos);
+    setup_position(pos);
+}
+void reset_engine(){
+    // engine_active = 0;
+    evaluation_bar = 0;
+    best_move_pgn[0] = '\0';
 }
 void clear_halfmoves(){
     halfmoves_count = 0;
     halfmoves_at = 0;
+    reset_engine();
 }
 void restart_game(position_t* pos){
     reset_position(pos);
@@ -1094,11 +1130,13 @@ void poll_events(position_t* pos){
         printf("Checking moves at %d depth\n", depth);
         i32 score;
         move_t move = find_best_move(pos, depth, &score);
+        write_move_pgn(best_move_pgn, pos, move);
         printf("Best move with score: %d is: ", score);
         evaluation_bar = score;
 
-        print_move(move);
-        printf("\n");
+        printf("%s\n", best_move_pgn);
+        // print_move(move);
+        // printf("\n");
     }
 }
 
@@ -1128,7 +1166,7 @@ void chess_ui_run(){
 
     chess_reset(&position);
 
-    draw_init();
+    init_draw();
 
     restart_game(&position);
 
