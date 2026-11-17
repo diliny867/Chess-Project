@@ -30,7 +30,7 @@ typedef enum {
 } piece_e;
 typedef i32 piece_t;
 
-#define PIECE_FROM 1
+#define PIECE_FROM PAWN
 
 // #define PAWN   0
 // #define KNIGHT 1
@@ -1332,14 +1332,14 @@ void reset_position(position_t* pos){
     put_piece(pos, CBLACK, KING, 60);
 }
 
-void chess_setup(position_t* pos){
+void setup_position(position_t* pos){
     setup_next_turn(pos);
     reset_history(pos);
     // setup_board();
 }
 void chess_reset(position_t* pos){
     reset_position(pos);
-    chess_setup(pos);
+    setup_position(pos);
 }
 
 void fill_pseudo_legal_attacks_table(){
@@ -1413,7 +1413,7 @@ void fill_enpassant_affected_pawns_table(){
     }
 }
 
-void chess_init(){
+void init_chess(){
     fill_rays_table();
 
     fill_bishop_table();
