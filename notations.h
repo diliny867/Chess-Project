@@ -333,7 +333,7 @@ i32 write_move_pgn(char* buf, position_t* pos, move_t move){
             if(other_rank == rank) write_file = true;
             if(other_file == file) write_rank = true;
         }
-        if(!write_file && !write_rank) write_file = true; // other piece can capture, so we definitely write something
+        if(other_piece_count > 0 && !write_file && !write_rank) write_file = true; // other piece can capture, so we definitely write something
     }
     i32 out_from_string_count = 0;
     if(write_file) out_from_string[out_from_string_count++] = 'a' + file;

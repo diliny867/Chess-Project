@@ -43,6 +43,7 @@ bool doing_arrow = false;
 i32 evaluation_bar = 0;
 i32 engine_active = 0;
 char best_move_pgn[10] = { 0 };
+bool best_move_for_black = false;
 
 Rectangle played_turns_panel_view = { 0 };
 Vector2 played_turns_panel_scroll = { 0 };
@@ -119,7 +120,7 @@ Sound sounds[SOUND_COUNT];
 // #define EVAL_BACKGROUND     (Color){0x38, 0x38, 0x38, 0xFF}
 #define EVAL_BAR_BACKGROUND (Color){0x28, 0x28, 0x28, 0xFF}
 // #define EVAL_BLACK          (Color){0x10, 0x10, 0x10, 0xFF}
-#define EVAL_BLACK          (Color){0x28, 0x28, 0x28, 0xFF}
+#define EVAL_BLACK          (Color){0x8F, 0x8F, 0x8F, 0xFF}
 #define EVAL_WHITE          (Color){0xEF, 0xEF, 0xEF, 0xFF}
 
 #define PLAYED_TURNS_PANEL_BACKGROUND (Color){0x28, 0x28, 0x28, 0xFF}
@@ -538,7 +539,7 @@ i32 pgn_to_icon_id(char pgn){
 f32 calculate_eval_white_percent(i32 eval){
     return 0.5f + 0.5f * (2.f / (1.f + exp(-0.00368208f * eval)) - 1.f);
 }
-void draw_eval_bar(){
+void draw_eval_bar(position_t* pos){
     i32 eval_x_pos = SCREEN_BOARD_SIZE + SCREEN_EVAL_BAR_OFFSET;
     i32 eval_y_offset = 16;
     i32 eval_width = 20;
@@ -570,6 +571,7 @@ void draw_eval_bar(){
     }
     DrawText(eval_text, eval_number_x_pos, eval_number_y_pos, font_size, EVAL_WHITE);
 
+    Color best_move_color = best_move_for_black ? EVAL_BLACK : EVAL_WHITE;
     i32 old_text_size = GuiGetStyle(DEFAULT, TEXT_SIZE);
     i32 best_move_font_size = 20;
     i32 best_move_x_pos = eval_number_x_pos + 120; // SCREEN_BOARD_SIZE + SCREEN_EVAL_WIDTH + 50;
@@ -580,14 +582,14 @@ void draw_eval_bar(){
     strcpy(best_move_text, GuiIconText(icon_id, best_move_pgn + advance));
     if(best_move_pgn[0] != '\0'){ // turn exists
         GuiSetStyle(DEFAULT, TEXT_SIZE, best_move_font_size);
-        GuiDrawText(best_move_text, (Rectangle){ best_move_x_pos, best_move_y_pos, 999, 0 }, TEXT_ALIGN_LEFT, EVAL_WHITE);
+        GuiDrawText(best_move_text, (Rectangle){ best_move_x_pos, best_move_y_pos, 999, 0 }, TEXT_ALIGN_LEFT, best_move_color);
         GuiSetStyle(DEFAULT, TEXT_SIZE, old_text_size);
     }
     // DrawText(best_move_text, best_move_x_pos, best_move_y_pos, best_move_font_size, EVAL_WHITE);
 }
-void draw_eval(){
+void draw_eval(position_t* pos){
     if(engine_active){
-        draw_eval_bar();
+        draw_eval_bar(pos);
     }
 
     i32 toggle_engine_slider_x_pos = SCREEN_BOARD_SIZE + SCREEN_EVAL_WIDTH + 280;
@@ -764,7 +766,7 @@ void draw_controls(position_t* pos){
 void draw_menu(position_t* pos){
     DrawRectangle(SCREEN_BOARD_SIZE, 0, SCREEN_MENU_WIDTH, SCREEN_HEIGHT, MENU_BACKGROUND);
 
-    draw_eval();
+    draw_eval(pos);
     draw_played_turns(pos);
     draw_controls(pos);
 }
@@ -964,6 +966,7 @@ void reset_engine(){
     // engine_active = 0;
     evaluation_bar = 0;
     best_move_pgn[0] = '\0';
+    best_move_for_black = false;
 }
 void clear_halfmoves(){
     halfmoves_count = 0;
@@ -1133,6 +1136,7 @@ void poll_events(position_t* pos){
         write_move_pgn(best_move_pgn, pos, move);
         printf("Best move with score: %d is: ", score);
         evaluation_bar = score;
+        best_move_for_black = pos->blacks_turn;
 
         printf("%s\n", best_move_pgn);
         // print_move(move);
