@@ -152,10 +152,21 @@ i32* pesto_tables_eg[PIECE_MAX] = {
     0, pawn_increase_eg, knight_increase_eg, bishop_increase_eg, rook_increase_eg, queen_increase_eg, king_increase_eg
 };
 i32 gamephase_increase[PIECE_MAX] = { 0, 0, 1, 1, 2, 4, 0 };
+#define whites_as_blacks_index(index) ((index) ^ 56)
 
-static force_inline whites_as_blacks_index(i32 index){
-    return index ^ 56;
-}
+// https://web.archive.org/web/20180714011607/https://www.stmintz.com/ccc/index.php?id=341763
+// & this mask with enemy pawns mask to check if any prevent passing pawn
+u64 passed_pawn_masks[CCOLOR_COUNT][64] = { 0 };
+i32 passed_pawn_increase[64] = {
+      0,   0,   0,   0,   0,   0,   0,   0,
+    178, 173, 158, 134, 147, 132, 165, 187,
+     94, 100,  85,  67,  56,  53,  82,  84,
+     32,  24,  13,   5,  -2,   4,  17,  17,
+     13,   9,  -3,  -7,  -7,  -8,   3,  -1,
+      4,   7,  -6,   1,   0,  -5,  -1,  -8,
+     13,   8,   8,  10,  13,   0,   2,  -7,
+      0,   0,   0,   0,   0,   0,   0,   0,
+};
 
 void init_tables(){
     for (piece_t p = PIECE_FROM; p < PIECE_MAX; p++) {
@@ -165,6 +176,38 @@ void init_tables(){
             piece_values_table_eg[CWHITE][p][i] = piece_values_eg[p] + pesto_tables_eg[p][i];
             piece_values_table_eg[CBLACK][p][i] = piece_values_eg[p] + pesto_tables_eg[p][whites_as_blacks_index(i)];
         }
+    }
+
+    for(i32 i = 0; i < 64; i++){
+        i32 rank = i / 8;
+        i32 file = i % 8;
+        u64 whites_mask = ~0;
+        u64 blacks_mask = ~0;
+
+        // clear non influencing squares
+        for(i32 file_it = 0; file_it <= 7; file_it++){
+            u64 mask = file_to_mask[file_it];
+            if(file_it < file - 1){
+                whites_mask &= ~mask;
+                blacks_mask &= ~mask;
+            }
+            if(file_it > file + 1){
+                whites_mask &= ~mask;
+                blacks_mask &= ~mask;
+            }
+        }
+        for(i32 rank_it = 0; rank_it <= 7; rank_it++){
+            u64 mask = rank_to_mask[rank_it];
+            if(rank_it <= rank){
+                whites_mask &= ~mask;
+            }
+            if(rank_it >= rank){
+                blacks_mask &= ~mask;
+            }
+        }
+
+        passed_pawn_masks[CWHITE][i] = whites_mask;
+        passed_pawn_masks[CBLACK][i] = blacks_mask;
     }
 }
 void init_engine(){
@@ -187,7 +230,7 @@ static force_inline i32 evaluate_relative(position_t* pos) {
             while(mask){
                 i32 index = extract_piece(&mask);
                 mg[c] += piece_values_table_mg[c][p][index];
-                eg[c] += piece_values_table_mg[c][p][index];
+                eg[c] += piece_values_table_eg[c][p][index];
                 phase += gamephase_increase[p];
             }
         }
