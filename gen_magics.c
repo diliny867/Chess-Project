@@ -1,6 +1,4 @@
 
-// gcc gen_magics.c -o gen_magics -O1 -std=c99 -I ./include/
-
 #include "common.h"
 #include "xorshift.h"
 
@@ -59,19 +57,19 @@ i32 get_dist_to_edge(i32 index, i32 direction){
     switch (direction){
     case 1:
         return 7 - f;
-    case 8: 
+    case 8:
         return 7 - r;
-    case -1: 
+    case -1:
         return f;
-    case -8: 
+    case -8:
         return r;
-    case 7: 
+    case 7:
         return min(7 - r, f);
-    case 9: 
+    case 9:
         return min(7 - r, 7 - f);
-    case -7: 
+    case -7:
         return min(r, 7 - f);
-    case -9: 
+    case -9:
         return min(r, f);
     }
     return 0;
@@ -116,29 +114,29 @@ bool try_magic(u64 mask, u64 magic, u32 shift, i32 index, u64* table, i32 direct
         }
 
     } while(sub = next_subset(sub, mask));
-    
+
     return true;
 }
 
 xorshift64_state xs;
 void gen_magic(i32 index, i32 directions[4], u64* magics, u32* shifts, u64* masks, bool bishop){
-    
+
     u64 mask = gen_slider_mask(index, directions);
     // print_mask(mask);
     // printf("\n");
-    
+
     u64 shift = 64 - bit_count(mask);
     u64 size = 1 << bit_count(mask);
-    
+
     assert(bishop ? shift >= 55 : shift >= 52);
-    
+
     u64 magic;
     u64* table;
     bool found;
     while(true){
         magic = xorshift64(&xs) & xorshift64(&xs) & xorshift64(&xs);
-        
-        table = calloc(size, sizeof(u64)); // probably faster to alloc then free than memzero static array
+
+        table = (u64*)calloc(size, sizeof(u64)); // probably faster to alloc then free than memzero static array
         found = try_magic(mask, magic, shift, index, table, directions);
         free(table);
 
@@ -153,11 +151,11 @@ void gen_magic(i32 index, i32 directions[4], u64* magics, u32* shifts, u64* mask
 }
 
 void gen_magics(){
-    xs = (xorshift64_state){ time(0) };
+    xs = (xorshift64_state){ (u64)time(0) };
 
     i32 bishop_directions[4] = { 7, 9, -9, -7 };
     i32 rook_directions[4] = { 1, 8, -8, -1 };
-    
+
     for(i32 i = 0; i < 64; i++){
         gen_magic(i, bishop_directions, bishop_magics, bishop_shifts, bishop_masks, true);
     }
