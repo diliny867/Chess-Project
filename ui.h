@@ -230,6 +230,15 @@ void save_halfmove(position_t* pos, move_t move){
 
 }
 
+void ui_put_piece(position_t* pos, bool black, piece_t piece, i32 index){
+    put_piece(pos, black, piece, index);
+}
+void ui_do_move(position_t* pos, move_t move){
+    // before doing the move
+    save_halfmove(pos, move);
+    do_move(pos, move);
+}
+
 void play_move_sound(position_t* pos, move_t move){
     move_type_e type = move_get_type(move);
     if(game_state == DRAW || game_state == CHECKMATE){
@@ -257,6 +266,27 @@ void after_move(position_t* pos){
     else deselect_for_turn_highlight();
     deselect_piece();
 
+    if(is_checkmate(pos)){
+        game_state = CHECKMATE;
+        // PlaySound(sounds[SOUND_NOTIFY]);
+        return;
+    }else if(is_draw(pos)){
+        game_state = DRAW;
+        // PlaySound(sounds[SOUND_NOTIFY]);
+        return;
+    }else{
+        game_state = GAME;
+    }
+}
+
+bool load_best_move(position_t* pos){
+    if(best_move != 0 && engine_active && game_state == GAME && can_play_move(pos, best_move)){
+        ui_do_move(pos, best_move);
+        after_move(pos);
+        play_move_sound(pos, best_move);
+        return true;
+    }
+    return false;
 }
 void load_at_halfmove(position_t* pos, i32 halfmove){
     if(halfmoves_at < halfmoves_count || halfmove < halfmoves_count){
@@ -853,17 +883,6 @@ void clear_arrows(){
     doing_arrow = false;
 }
 
-void end_turn(position_t* pos){
-    if(is_checkmate(pos)){
-        game_state = CHECKMATE;
-        // PlaySound(sounds[SOUND_NOTIFY]);
-        return;
-    }else if(is_draw(pos)){
-        game_state = DRAW;
-        // PlaySound(sounds[SOUND_NOTIFY]);
-        return;
-    }
-}
 
 // pretty rudimentary special move checking
 bool move_is_double_pawn_move(piece_t piece, i32 from, i32 to){
@@ -946,8 +965,6 @@ void play_move(position_t* pos, i32 new_index, i32 arg){
 
     do_move(pos, move);
 
-    end_turn(pos);
-
     after_move(pos);
 
     play_move_sound(pos, move);
@@ -980,15 +997,6 @@ void restart_game(position_t* pos){
     setup_game(pos);
 }
 
-void ui_put_piece(position_t* pos, bool black, piece_t piece, i32 index){
-    put_piece(pos, black, piece, index);
-}
-void ui_do_move(position_t* pos, move_t move){
-    // before doing the move
-    save_halfmove(pos, move);
-    do_move(pos, move);
-}
-
 void poll_events(position_t* pos){
     mouse_x = GetMouseX();
     mouse_y = GetMouseY();
@@ -998,6 +1006,107 @@ void poll_events(position_t* pos){
     mouse_over_board = mouse_is_over_board();
     hover_index = position_to_index(mouse_x, mouse_y);
 
+
+    if(IsKeyPressed(KEY_M)){
+        if(GetMasterVolume() == 0.0f) SetMasterVolume(1.0f);
+        else                          SetMasterVolume(0.0f);
+    }
+
+    if(IsKeyPressed(KEY_R)){
+        PlaySound(sounds[SOUND_GAME_START]);
+        restart_game(pos);
+        return;
+    }
+    if(IsKeyPressed(KEY_DOWN)){
+        load_first_halfmove_sound(pos);
+    }
+    if(IsKeyPressed(KEY_LEFT) || IsKeyPressedRepeat(KEY_LEFT)){
+        load_previous_halfmove_sound(pos);
+    }
+    if(IsKeyPressed(KEY_RIGHT) || IsKeyPressedRepeat(KEY_RIGHT)){
+        load_next_halfmove_sound(pos);
+    }
+    if(IsKeyPressed(KEY_UP)){
+        load_last_halfmove_sound(pos);
+    }
+        if(IsKeyPressed(KEY_E)){
+        load_best_move(pos);
+    }
+
+    if(IsKeyPressed(KEY_P)){
+        if(IsKeyDown(KEY_LEFT_SHIFT)){ // load instead if shift held shift
+            char* clipboard = (char*)GetClipboardText();
+            printf("Clipboard: <%s>\n", clipboard);
+            restart_game(pos);
+            *pos = parse_pgn(clipboard, ui_do_move);
+            if(halfmoves_at > 0)
+                select_for_turn_highlight(halfmoves[halfmoves_at - 1]);
+            PlaySound(sounds[SOUND_GAME_START]);
+        }else{
+            char* pgn = moves_to_pgn(pos, halfmoves, halfmoves_count);
+            SetClipboardText(pgn);
+            PlaySound(sounds[SOUND_NOTIFY]);
+            printf("PGN of current position: %s\n", pgn);
+        }
+    }
+
+    if(IsKeyPressed(KEY_F)){
+        if(IsKeyDown(KEY_LEFT_SHIFT)){ // load instead if shift held shift
+            char* clipboard = (char*)GetClipboardText();
+            printf("Clipboard: <%s>\n", clipboard);
+            clear_halfmoves();
+            *pos = parse_fen(clipboard, ui_put_piece);
+            setup_game(pos);
+            PlaySound(sounds[SOUND_GAME_START]);
+        }else{
+            char* fen = position_to_fen(pos);
+            SetClipboardText(fen);
+            PlaySound(sounds[SOUND_NOTIFY]);
+            printf("FEN of current position: %s\n", fen);
+        }
+    }
+
+    if(IsKeyPressed(KEY_T) && engine_active){
+        printf("Static material evaluation: %d\n", evaluate_relative(pos));
+        i32 depth = 6; // https://en.wikipedia.org/wiki/Shannon_number
+        //printf("Engine evaluation: %llu at %d depth\n", get_score(pos, depth), depth);
+
+        printf("Checking moves at %d depth\n", depth);
+        clock_t begin = clock();
+        bool success = check_moves_at_depth(pos, depth);
+        clock_t end = clock();
+        printf(success ? "Success\n" : "Failure\n");
+
+        printf("Runtime: %lldms\n", (long long)(end - begin) * 1000 / CLOCKS_PER_SEC);
+    }
+
+    if((IsKeyPressed(KEY_SPACE) || (IsKeyPressedRepeat(KEY_SPACE) && IsKeyDown(KEY_LEFT_SHIFT))) && engine_active){
+        printf("Static material evaluation: %d\n", evaluate_relative(pos));
+        i32 depth = 6;
+
+        printf("Checking moves at %d depth\n", depth);
+        i32 score;
+        clock_t begin = clock();
+        move_t move = find_best_move(pos, depth, &score);
+        clock_t end = clock();
+        best_move = move;
+        write_move_pgn(best_move_pgn, pos, move);
+        evaluation_bar = score;
+        best_move_for_black = pos->blacks_turn;
+
+        printf("Best move with score: %d is: ", score);
+        printf("%s\n", best_move_pgn);
+        // print_move(move);
+        // printf("\n");
+
+        printf("Runtime: %lldms\n", (long long)(end - begin) * 1000 / CLOCKS_PER_SEC);
+
+        if(IsKeyDown(KEY_LEFT_SHIFT)){
+            load_best_move(pos);
+        }
+    }
+
+    // return before mouse events if on end screen
     if(game_state != GAME){
         if(IsKeyPressed(KEY_ENTER)){
             PlaySound(sounds[SOUND_GAME_START]);
@@ -1005,11 +1114,7 @@ void poll_events(position_t* pos){
         }
         return;
     }
-    if(IsKeyPressed(KEY_R)){
-        PlaySound(sounds[SOUND_GAME_START]);
-        restart_game(pos);
-        return;
-    }
+
 
     i32 new_index = hover_index;
 
@@ -1064,101 +1169,6 @@ void poll_events(position_t* pos){
             }
         }
         dragged_piece = EMPTY_PIECE;
-    }
-
-    if(IsKeyPressed(KEY_DOWN)){
-        load_first_halfmove_sound(pos);
-    }
-    if(IsKeyPressed(KEY_LEFT) || IsKeyPressedRepeat(KEY_LEFT)){
-        load_previous_halfmove_sound(pos);
-    }
-    if(IsKeyPressed(KEY_RIGHT) || IsKeyPressedRepeat(KEY_RIGHT)){
-        load_next_halfmove_sound(pos);
-    }
-    if(IsKeyPressed(KEY_UP)){
-        load_last_halfmove_sound(pos);
-    }
-
-    if(IsKeyPressed(KEY_E)){
-        if(best_move != 0 && engine_active && can_play_move(pos, best_move)){
-            ui_do_move(pos, best_move);
-            after_move(pos);
-            play_move_sound(pos, best_move);
-        }
-    }
-
-    if(IsKeyPressed(KEY_M)){
-        if(GetMasterVolume() == 0.0f) SetMasterVolume(1.0f);
-        else                          SetMasterVolume(0.0f);
-    }
-
-    if(IsKeyPressed(KEY_P)){
-        if(IsKeyDown(KEY_LEFT_SHIFT)){ // load instead if shift held shift
-            char* clipboard = (char*)GetClipboardText();
-            printf("Clipboard: <%s>\n", clipboard);
-            restart_game(pos);
-            *pos = parse_pgn(clipboard, ui_do_move);
-            if(halfmoves_at > 0)
-                select_for_turn_highlight(halfmoves[halfmoves_at - 1]);
-            PlaySound(sounds[SOUND_GAME_START]);
-        }else{
-            char* pgn = moves_to_pgn(pos, halfmoves, halfmoves_count);
-            SetClipboardText(pgn);
-            PlaySound(sounds[SOUND_NOTIFY]);
-            printf("PGN of current position: %s\n", pgn);
-        }
-    }
-
-    if(IsKeyPressed(KEY_F)){
-        if(IsKeyDown(KEY_LEFT_SHIFT)){ // load instead if shift held shift
-            char* clipboard = (char*)GetClipboardText();
-            printf("Clipboard: <%s>\n", clipboard);
-            clear_halfmoves();
-            *pos = parse_fen(clipboard, ui_put_piece);
-            setup_game(pos);
-            PlaySound(sounds[SOUND_GAME_START]);
-        }else{
-            char* fen = position_to_fen(pos);
-            SetClipboardText(fen);
-            PlaySound(sounds[SOUND_NOTIFY]);
-            printf("FEN of current position: %s\n", fen);
-        }
-    }
-
-    if(IsKeyPressed(KEY_T) && engine_active){
-        printf("Static material evaluation: %d\n", evaluate_relative(pos));
-        i32 depth = 6; // https://en.wikipedia.org/wiki/Shannon_number
-        //printf("Engine evaluation: %llu at %d depth\n", get_score(pos, depth), depth);
-
-        printf("Checking moves at %d depth\n", depth);
-        clock_t begin = clock();
-        bool success = check_moves_at_depth(pos, depth);
-        clock_t end = clock();
-        printf(success ? "Success\n" : "Failure\n");
-
-        printf("Runtime: %lldms\n", (long long)(end - begin) * 1000 / CLOCKS_PER_SEC);
-    }
-
-    if(IsKeyPressed(KEY_SPACE) && engine_active){
-        printf("Static material evaluation: %d\n", evaluate_relative(pos));
-        i32 depth = 7;
-
-        printf("Checking moves at %d depth\n", depth);
-        i32 score;
-        clock_t begin = clock();
-        move_t move = find_best_move(pos, depth, &score);
-        clock_t end = clock();
-        best_move = move;
-        write_move_pgn(best_move_pgn, pos, move);
-        evaluation_bar = score;
-        best_move_for_black = pos->blacks_turn;
-
-        printf("Best move with score: %d is: ", score);
-        printf("%s\n", best_move_pgn);
-        // print_move(move);
-        // printf("\n");
-
-        printf("Runtime: %lldms\n", (long long)(end - begin) * 1000 / CLOCKS_PER_SEC);
     }
 }
 
