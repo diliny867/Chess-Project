@@ -381,7 +381,8 @@ i32 nega_max(position_t* pos, i32 depth) {
 i32 alpha_beta(position_t* pos, i32 alpha, i32 beta, i32 depth, i32 ply){
     move_t moves[MAX_MOVES];
 
-    if(is_threefold_repetition(pos)) return 0;
+    if(has_repeated_ply(pos, ply)) return 0;
+    // if(is_threefold_repetition(pos)) return 0;
 
     if(depth <= 0){
         // only pay for move generation when in check can we be mated and only after 50 moves the draw matters

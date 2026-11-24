@@ -1171,6 +1171,10 @@ bool has_repeated(position_t* pos, i32 tree_start){
     }
     return false;
 }
+// has_repeated but derive tree_start from ply
+bool has_repeated_ply(position_t* pos, i32 ply){
+    return has_repeated(pos, pos->history_count - ply);
+}
 bool is_threefold_repetition(position_t* pos){
     i32 count = 1;
     i32 lowest = pos->history_count - pos->halfmove_clock;
@@ -1194,7 +1198,7 @@ bool is_threefold_repetition(position_t* pos){
 // 100 half moves = 50 moves of each side
 #define is_fifty_move_draw(pos) ((pos)->halfmove_clock >= 100)
 // but always check checkmate and absense of legal moves first
-#define is_draw(pos) (is_threefold_repetition(pos) || is_fifty_move_draw(pos))
+#define is_draw(pos) (is_fifty_move_draw(pos) || is_threefold_repetition(pos))
 
 // makes a legal move and cheap updates: pieces, hash, history, checkers
 // enemy attacks and pins are calculated at ensure_setup, so search leaves never pay for them
