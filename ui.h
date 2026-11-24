@@ -42,6 +42,7 @@ bool doing_arrow = false;
 
 i32 evaluation_bar = 0;
 i32 engine_active = 0;
+move_t best_move = 0;
 char best_move_pgn[10] = { 0 };
 bool best_move_for_black = false;
 
@@ -251,7 +252,7 @@ void load_start_position(position_t* pos){
     setup_position(pos);
 }
 
-void after_halfmove(position_t* pos){
+void after_move(position_t* pos){
     if(halfmoves_at > 0) select_for_turn_highlight(halfmoves[halfmoves_at - 1]);
     else deselect_for_turn_highlight();
     deselect_piece();
@@ -268,7 +269,7 @@ void load_at_halfmove(position_t* pos, i32 halfmove){
         }
 
         halfmoves_at = halfmove;
-        after_halfmove(pos);
+        after_move(pos);
     }
 }
 void load_next_halfmove(position_t* pos){
@@ -276,7 +277,7 @@ void load_next_halfmove(position_t* pos){
         do_move(pos, halfmoves[halfmoves_at]);
         halfmoves_at++;
         if(halfmoves_at > halfmoves_count) halfmoves_at = halfmoves_count;
-        after_halfmove(pos);
+        after_move(pos);
     }
 }
 void load_previous_halfmove(position_t* pos){
@@ -289,7 +290,7 @@ void load_first_halfmove(position_t* pos){
         load_start_position(pos);
 
         halfmoves_at = 0;
-        after_halfmove(pos);
+        after_move(pos);
     }
 }
 void load_last_halfmove(position_t* pos){
@@ -580,7 +581,7 @@ void draw_eval_bar(position_t* pos){
     i32 icon_id = pgn_to_icon_id(best_move_pgn[0]);
     i32 advance = icon_id != ICON_NONE && icon_id != ICON_PAWN && icon_id != ICON_CASTLING ? 1 : 0;
     strcpy(best_move_text, GuiIconText(icon_id, best_move_pgn + advance));
-    if(best_move_pgn[0] != '\0'){ // turn exists
+    if(best_move != 0){ // turn exists
         GuiSetStyle(DEFAULT, TEXT_SIZE, best_move_font_size);
         GuiDrawText(best_move_text, (Rectangle){ best_move_x_pos, best_move_y_pos, 999, 0 }, TEXT_ALIGN_LEFT, best_move_color);
         GuiSetStyle(DEFAULT, TEXT_SIZE, old_text_size);
@@ -900,8 +901,6 @@ bool move_is_castling(piece_t piece, i32 from, i32 to){
 }
 
 void play_move(position_t* pos, i32 new_index, i32 arg){
-    select_for_turn_highlight(selected_index, new_index);
-
     bool capture = index_occupied(pos->all_pieces, new_index);
     bool enpassant = move_is_enpassant(pos->all_pieces, selected_piece, selected_index, new_index);
 
@@ -949,7 +948,7 @@ void play_move(position_t* pos, i32 new_index, i32 arg){
 
     end_turn(pos);
 
-    deselect_piece();
+    after_move(pos);
 
     play_move_sound(pos, move);
 }
@@ -961,17 +960,19 @@ void setup_game(position_t* pos){
     deselect_piece();
     start_position = *pos;
     setup_position(pos);
+    reset_engine();
 }
-void reset_engine(){
+void reset_engine_ui(){
     // engine_active = 0;
     evaluation_bar = 0;
+    best_move = 0;
     best_move_pgn[0] = '\0';
     best_move_for_black = false;
 }
 void clear_halfmoves(){
     halfmoves_count = 0;
     halfmoves_at = 0;
-    reset_engine();
+    reset_engine_ui();
 }
 void restart_game(position_t* pos){
     reset_position(pos);
@@ -1078,6 +1079,14 @@ void poll_events(position_t* pos){
         load_last_halfmove_sound(pos);
     }
 
+    if(IsKeyPressed(KEY_E)){
+        if(best_move != 0 && engine_active && can_play_move(pos, best_move)){
+            ui_do_move(pos, best_move);
+            after_move(pos);
+            play_move_sound(pos, best_move);
+        }
+    }
+
     if(IsKeyPressed(KEY_M)){
         if(GetMasterVolume() == 0.0f) SetMasterVolume(1.0f);
         else                          SetMasterVolume(0.0f);
@@ -1116,31 +1125,40 @@ void poll_events(position_t* pos){
         }
     }
 
-    if(IsKeyPressed(KEY_T)){
-        printf("Current material evaluation: %d\n", evaluate_relative(pos));
+    if(IsKeyPressed(KEY_T) && engine_active){
+        printf("Static material evaluation: %d\n", evaluate_relative(pos));
         i32 depth = 6; // https://en.wikipedia.org/wiki/Shannon_number
         //printf("Engine evaluation: %llu at %d depth\n", get_score(pos, depth), depth);
 
         printf("Checking moves at %d depth\n", depth);
+        clock_t begin = clock();
         bool success = check_moves_at_depth(pos, depth);
+        clock_t end = clock();
         printf(success ? "Success\n" : "Failure\n");
+
+        printf("Runtime: %lldms\n", (long long)(end - begin) * 1000 / CLOCKS_PER_SEC);
     }
 
-    if(IsKeyPressed(KEY_SPACE)){
-        printf("Current material evaluation: %d\n", evaluate_relative(pos));
-        i32 depth = 6;
+    if(IsKeyPressed(KEY_SPACE) && engine_active){
+        printf("Static material evaluation: %d\n", evaluate_relative(pos));
+        i32 depth = 7;
 
         printf("Checking moves at %d depth\n", depth);
         i32 score;
+        clock_t begin = clock();
         move_t move = find_best_move(pos, depth, &score);
+        clock_t end = clock();
+        best_move = move;
         write_move_pgn(best_move_pgn, pos, move);
-        printf("Best move with score: %d is: ", score);
         evaluation_bar = score;
         best_move_for_black = pos->blacks_turn;
 
+        printf("Best move with score: %d is: ", score);
         printf("%s\n", best_move_pgn);
         // print_move(move);
         // printf("\n");
+
+        printf("Runtime: %lldms\n", (long long)(end - begin) * 1000 / CLOCKS_PER_SEC);
     }
 }
 

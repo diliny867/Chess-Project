@@ -233,7 +233,7 @@ typedef enum {
 typedef struct {
     u64 pieces[PIECE_MAX];
     u64 colors[CCOLOR_COUNT];
-    i32 pieces_in_squares[64];
+    piece_t pieces_in_squares[64];
     u64 all_pieces;
     u64 pseudo_attacks[PIECE_MAX];
     u64 all_pseudo_attacks;
@@ -1211,7 +1211,7 @@ void do_move_lazy(position_t* pos, move_t move){
 
     u64* pieces = pos->pieces;
     u64* colors = pos->colors;
-    i32* pieces_in_squares = pos->pieces_in_squares;
+    piece_t* pieces_in_squares = pos->pieces_in_squares;
 
     if(pos->enpassantable) hash ^= zobrist_enpassant[mask_to_index(pos->enpassantable)];
     pos->enpassantable = 0;
@@ -1303,6 +1303,19 @@ void do_null_move(position_t* pos){
     }
 }
 
+bool can_play_move(position_t* pos, move_t move){
+    // check if our color and check if piece is on correct place
+    if(pos->blacks_turn != move_get_color(move))                                     return false;
+    if(pos->pieces_in_squares[move_get_from(move)] != (piece_t)move_get_piece(move)) return false;
+
+    // slow
+    move_t moves[MAX_MOVES];
+    i32 moves_count = get_moves(pos, moves, true);
+    for(i32 i = 0; i < moves_count; i++){
+        if(moves[i] == move) return true;
+    }
+    return false;
+}
 
 void reset_position(position_t* pos){
     *pos = (position_t){ 0 };
