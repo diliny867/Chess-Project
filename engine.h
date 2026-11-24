@@ -5,8 +5,9 @@
 #include <time.h>
 
 
-#define MATE_VALUE   1000000
 #define INF_VALUE    2000000
+#define MATE_VALUE   1000000
+#define MATE_BOUND   (MATE_VALUE - 10000)
 
 // Values from:
 // https://chessprogramming.org/PeSTO%27s_Evaluation_Function
@@ -159,16 +160,69 @@ i32 gamephase_increase[PIECE_MAX] = { 0, 0, 1, 1, 2, 4, 0 };
 u64 passed_pawn_masks[CCOLOR_COUNT][64] = { 0 };
 i32 passed_pawn_increase[64] = {
       0,   0,   0,   0,   0,   0,   0,   0,
-    178, 173, 158, 134, 147, 132, 165, 187,
-     94, 100,  85,  67,  56,  53,  82,  84,
-     32,  24,  13,   5,  -2,   4,  17,  17,
-     13,   9,  -3,  -7,  -7,  -8,   3,  -1,
-      4,   7,  -6,   1,   0,  -5,  -1,  -8,
-     13,   8,   8,  10,  13,   0,   2,  -7,
+      0,   0,   0,   0,   0,   0,   0,   0,
+     90,  90,  90,  90,  90,  90,  90,  90,
+     60,  60,  60,  60,  60,  60,  60,  60,
+     50,  50,  50,  50,  50,  50,  50,  50,
+     40,  40,  40,  40,  40,  40,  40,  40,
+     30,  30,  30,  30,  30,  30,  30,  30,
       0,   0,   0,   0,   0,   0,   0,   0,
 };
 
-void init_tables(){
+
+// https://web.archive.org/web/20071031100051/http://www.brucemo.com/compchess/programming/hashing.htm
+typedef enum {
+    TT_EXACT = 0,
+    TT_ALPHA = 1,
+    TT_BETA  = 2
+} tt_flag_e;
+typedef struct {
+    u64 hash;
+    move_t move;
+    i32 score;
+    u8 depth;
+    u8 flag;
+} transposition_t;
+
+#define TRANSPOSITION_TABLE_SIZE 0x800000
+static_assert(bit_count(TRANSPOSITION_TABLE_SIZE) == 1, "Bit count of not 1 breaks entry index calculation code");
+
+transposition_t transposition_table[TRANSPOSITION_TABLE_SIZE];
+
+void clear_tt(){
+    zero_array(transposition_table);
+}
+
+static inline i32 score_to_tt(i32 score, i32 ply){
+    if(score >=  MATE_BOUND) return score + ply;
+    if(score <= -MATE_BOUND) return score - ply;
+    return score;
+}
+static inline i32 score_from_tt(i32 score, i32 ply){
+    if(score >=  MATE_BOUND) return score - ply;
+    if(score <= -MATE_BOUND) return score + ply;
+    return score;
+}
+
+transposition_t* read_tt(u64 hash){
+    transposition_t* entry = &transposition_table[hash & (TRANSPOSITION_TABLE_SIZE - 1)];
+
+    if(entry->hash == hash){
+        return entry;
+    }
+    return NULL;
+}
+void write_tt(u64 hash, move_t move, i32 score, i32 depth, u8 flag, i32 ply){
+    transposition_t* entry = &transposition_table[hash & (TRANSPOSITION_TABLE_SIZE - 1)];
+
+    entry->hash = hash;
+    entry->move = move;
+    entry->score = score_to_tt(score, ply);
+    entry->depth = depth > 255 ? 255 : depth;
+    entry->flag = flag;
+}
+
+void init_piece_tables(){
     for (piece_t p = PIECE_FROM; p < PIECE_MAX; p++) {
         for (i32 i = 0; i < 64; i++) {
             piece_values_table_mg[CWHITE][p][i] = piece_values_mg[p] + pesto_tables_mg[p][i];
@@ -211,7 +265,11 @@ void init_tables(){
     }
 }
 void init_engine(){
-    init_tables();
+    init_piece_tables();
+    clear_tt();
+}
+void reset_engine(){
+    clear_tt();
 }
 
 // material from the point of view of the side to move
@@ -334,6 +392,20 @@ i32 alpha_beta(position_t* pos, i32 alpha, i32 beta, i32 depth, i32 ply){
         return evaluate_relative(pos);
     }
 
+    i32 old_alpha = alpha;
+    move_t tt_move = 0;
+    transposition_t* tt_entry = read_tt(pos->hash);
+    if(tt_entry){
+        tt_move = tt_entry->move;
+        if(tt_entry->depth >= depth){
+            i32 score = score_from_tt(tt_entry->score, ply);
+            u8 flag = tt_entry->flag;
+            if(flag == TT_EXACT)                   return score;
+            if(flag == TT_ALPHA && score <= alpha) return alpha;
+            if(flag == TT_BETA  && score >= beta)  return beta;
+        }
+    }
+
     i32 moves_count = get_moves(pos, moves, true);
     if(moves_count == 0){
         return in_check(pos, pos->blacks_turn) ? -(MATE_VALUE - ply) : 0;
@@ -342,7 +414,17 @@ i32 alpha_beta(position_t* pos, i32 alpha, i32 beta, i32 depth, i32 ply){
 
     i32 scores[MAX_MOVES];
     score_moves(moves, scores, moves_count);
+    // move best remebered move in front
+    if(tt_move != 0){
+        for(i32 i = 0; i < moves_count; i++){
+            if(moves[i] == tt_move){
+                scores[i] = INF_VALUE;
+                break;
+            }
+        }
+    }
 
+    move_t best_move = 0;
     position_t start_pos = *pos;
     for(i32 i = 0; i < moves_count; i++){
         move_t move = pick_move(moves, scores, i, moves_count);
@@ -351,9 +433,17 @@ i32 alpha_beta(position_t* pos, i32 alpha, i32 beta, i32 depth, i32 ply){
         i32 score = -alpha_beta(pos, -beta, -alpha, depth - 1, ply + 1);
         *pos = start_pos;
 
-        if(score >= beta) return beta;
-        if(score > alpha) alpha = score;
+        if(score >= beta){
+            write_tt(pos->hash, move, beta, depth, TT_BETA, ply);
+            return beta;
+        }
+        if(score > alpha){
+            best_move = move;
+            alpha = score;
+        }
     }
+    write_tt(pos->hash, best_move, alpha, depth, (alpha > old_alpha ? TT_EXACT : TT_ALPHA), ply);
+
     return alpha;
 }
 
@@ -416,10 +506,10 @@ bool check_moves_at_depth(position_t* pos, i32 depth){
     assert(depth <= 10);
 
     printf("Evaluating from %s perspective\n", pos->blacks_turn ? "blacks" : "whites");
-    clock_t begin = clock();
+    // clock_t begin = clock();
     u64 total_moves = perft(pos, depth);
-    clock_t end = clock();
-    printf("Runtime: %lldms\n", (long long)(end - begin) * 1000 / CLOCKS_PER_SEC);
+    // clock_t end = clock();
+    // printf("Runtime: %lldms\n", (long long)(end - begin) * 1000 / CLOCKS_PER_SEC);
 
     i64 diff = total_moves - possible_moves[depth];
     printf("Moves checked: %llu  Expected: %llu  Diff: %lld \n", total_moves, possible_moves[depth], diff);
@@ -433,10 +523,10 @@ i32 get_score(position_t* pos, i32 depth){
 
     printf("Evaluating from %s perspective\n", pos->blacks_turn ? "blacks" : "whites");
     total_moves = 0;
-    clock_t begin = clock();
+    // clock_t begin = clock();
     i32 score = nega_max(pos, depth);
-    clock_t end = clock();
-    printf("Runtime: %lldms\n", (long long)(end - begin) * 1000 / CLOCKS_PER_SEC);
+    // clock_t end = clock();
+    // printf("Runtime: %lldms\n", (long long)(end - begin) * 1000 / CLOCKS_PER_SEC);
 
     printf("Moves checked: %llu  Expected: %llu  Diff: %lld \n", (unsigned long long)total_moves,
            (unsigned long long)possible_moves[depth], (long long)(total_moves - possible_moves[depth]));
