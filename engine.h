@@ -441,7 +441,7 @@ static force_inline move_t pick_move(move_t* moves, i32* scores, i32 i, i32 coun
 
 // https://www.chessprogramming.org/Quiescence_Search
 static i32 quiescence(position_t* pos, i32 alpha, i32 beta, i32 ply){
-    if((++search_state.nodes && COMUNICATION_CHECK_MASK) == 0) communicate();
+    if((++search_state.nodes & COMMUNICATION_CHECK_MASK) == 0) communicate();
     if(search_state.stop) return 0;
     if(ply > MAX_PLY) return evaluate_relative(pos);
 
