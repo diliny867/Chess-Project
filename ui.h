@@ -1076,22 +1076,17 @@ void poll_events(position_t* pos){
 
     if((IsKeyPressed(KEY_SPACE) || (IsKeyPressedRepeat(KEY_SPACE) && IsKeyDown(KEY_LEFT_SHIFT))) && engine_active){
         printf("Static material evaluation: %d\n", evaluate_relative(pos));
-        i32 depth = 6;
+        i32 depth = 10;
 
-        printf("Checking moves at %d depth\n", depth);
-        i32 score;
-        clock_t begin = clock();
-        move_t move = find_best_move(pos, depth, &score);
-        clock_t end = clock();
-        best_move = move;
-        write_move_pgn(best_move_pgn, pos, move);
-        evaluation_bar = score;
+        search_limits_t limits = { 0, 5000, depth }; // nodes, seconds, depth
+
+        search_result_t res = search_position(pos, limits);
+        print_search_result(pos, res);
+
+        best_move = res.move;
+        write_move_pgn(best_move_pgn, pos, best_move);
+        evaluation_bar = res.score;
         best_move_for_black = pos->blacks_turn;
-
-        printf("Best move with score: %d is: ", score);
-        printf("%s\n", best_move_pgn);
-
-        printf("Runtime: %lldms\n", (long long)(end - begin) * 1000 / CLOCKS_PER_SEC);
 
         if(IsKeyDown(KEY_LEFT_SHIFT)){
             load_best_move(pos);

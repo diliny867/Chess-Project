@@ -12,9 +12,14 @@
 #define MATE_BOUND_VALUE  (MATE_VALUE - MAX_PLY)
 
 #define TT_MOVE_VALUE     MATE_VALUE
-#define MAX_HISTORY_VALUE 10000
+#define KILLER_1_VALUE    9500
+#define KILLER_2_VALUE    9000
+#define MAX_HISTORY_VALUE 8000 // below killer values
 
 #define PRUNING_DELTA     200
+
+
+#define COMMUNICATION_CHECK_MASK 4095
 
 
 // Values from:
@@ -205,10 +210,14 @@ typedef struct {
     i32 max_time_ms;
     i32 history_from;                  // initial pos.history_count - 1
     i32 depth;                         // also check so we dont stop on depth == 1
+    move_t killers[MAX_PLY][2];        // https://chessprogramming.org/Killer_Heuristic
     i32 history[CCOLOR_COUNT][64][64]; // https://chessprogramming.org/History_Heuristic
+    bool can_stop;
     bool stop;
 } search_state_t;
 search_state_t search_state;
+
+i32 positions_searched = 0;
 
 typedef struct {
     u64 max_nodes;   // check every 2048 nodes, 0 to off this limit
@@ -217,24 +226,31 @@ typedef struct {
 } search_limits_t;
 
 typedef struct {
+    u64 nodes;
     move_t move; // 0 if no legal moves
     i32 score;
-    u64 nodes;
     i32 time_ms;
     i32 depth;
 } search_result_t;
 
+void print_search_result(position_t* pos, search_result_t res){
+    printf("%3d search result:\n", positions_searched);
+    printf("Checked nodes: %10llu at depth: %3d for %5dms\n", res.nodes, res.depth, res.time_ms);
+    char best_move_pgn[10] = { 0 };
+    write_move_pgn(best_move_pgn, pos, res.move);
+    printf("Got best move: %s with score: %d\n", best_move_pgn, res.score);
+}
 
 static force_inline i32 search_time_elapsed_ms(){
     return (i32)((u64)(clock() - search_state.start_ms) * 1000 / CLOCKS_PER_SEC);
 }
 static force_inline void check_stop(){
-    if(search_state.depth <= 1) return;
+    if(!search_state.can_stop) return;
     if((search_state.max_nodes && search_state.nodes >= search_state.max_nodes) || (search_state.max_time_ms && search_time_elapsed_ms() >= search_state.max_time_ms)){
         search_state.stop = true;
     }
 }
-static force_inline void communicate(){
+static inline void communicate(){
     check_stop();
 }
 
@@ -243,16 +259,8 @@ static inline void update_history(move_t move, i32 bonus){
     bonus = clamp(bonus, -MAX_HISTORY_VALUE, MAX_HISTORY_VALUE);
     *entry += bonus - *entry * abs(bonus) / MAX_HISTORY_VALUE;
 }
-// https://chessprogramming.org/Beta-Cutoff
-static inline void quiet_cutoff(move_t move, i32 ply, i32 depth, move_t* tried, i32 count){
-    i32 bonus = min(70 * depth - 40, 1000);
-    update_history(move, bonus);    // reward this move
-    for(i32 i = 0; i < count; i++){ // punish other moves
-        if(tried[i] != move) update_history(tried[i], -bonus);
-    }
-}
 
-void clear_tt(){
+static force_inline void clear_tt(){
     zero_array(transposition_table);
 }
 
@@ -267,7 +275,7 @@ static force_inline i32 score_from_tt(i32 score, i32 ply){
     return score;
 }
 
-transposition_t* read_tt(u64 hash){
+static force_inline transposition_t* read_tt(u64 hash){
     transposition_t* entry = &transposition_table[hash & (TRANSPOSITION_TABLE_SIZE - 1)];
 
     if(entry->hash == hash){
@@ -275,7 +283,7 @@ transposition_t* read_tt(u64 hash){
     }
     return NULL;
 }
-void write_tt(u64 hash, move_t move, i32 score, i32 depth, u8 flag, i32 ply){
+static force_inline void write_tt(u64 hash, move_t move, i32 score, i32 depth, u8 flag, i32 ply){
     transposition_t* entry = &transposition_table[hash & (TRANSPOSITION_TABLE_SIZE - 1)];
 
     entry->hash = hash;
@@ -337,7 +345,7 @@ void reset_engine(){
 }
 
 // material from the point of view of the side to move
-static force_inline i32 evaluate_relative(position_t* pos) {
+static inline i32 evaluate_relative(position_t* pos) {
     u64* pieces = pos->pieces;
     u64* colors = pos->colors;
     bool black = pos->blacks_turn;
@@ -367,7 +375,7 @@ static force_inline i32 evaluate_relative(position_t* pos) {
 }
 
 // material from whites point of view
-// static force_inline i32 material_evaluate(position_t* pos) {
+// static inline i32 material_evaluate(position_t* pos) {
 //     u64* pieces = pos->pieces;
 //     u64* colors = pos->colors;
 //     i32 value = 0;
@@ -402,7 +410,21 @@ static force_inline bool move_is_quiet(move_t move){
 static force_inline i32 score_search_move(move_t move, move_t tt_move, i32 ply){
     if(move == tt_move)      return TT_MOVE_VALUE; // https://www.chessprogramming.org/Hash_Move
     if(!move_is_quiet(move)) return score_move(move);
+    if(move == search_state.killers[ply][0]) return KILLER_1_VALUE; // https://chessprogramming.org/Killer_Move
+    if(move == search_state.killers[ply][1]) return KILLER_2_VALUE;
     return search_state.history[move_get_color(move)][move_get_from(move)][move_get_to(move)]; // https://www.chessprogramming.org/History_Heuristic
+}
+// https://chessprogramming.org/Beta-Cutoff
+static force_inline void quiet_cutoff(move_t move, i32 ply, i32 depth, move_t* tried, i32 count){
+    if(search_state.killers[ply][0] != move){
+        search_state.killers[ply][1] = search_state.killers[ply][0];
+        search_state.killers[ply][0] = move;
+    }
+    i32 bonus = min(70 * depth - 40, 1000);
+    update_history(move, bonus);    // reward this move
+    for(i32 i = 0; i < count; i++){ // punish other moves
+        if(tried[i] != move) update_history(tried[i], -bonus);
+    }
 }
 
 
@@ -419,11 +441,11 @@ static force_inline move_t pick_move(move_t* moves, i32* scores, i32 i, i32 coun
 
 // https://www.chessprogramming.org/Quiescence_Search
 static i32 quiescence(position_t* pos, i32 alpha, i32 beta, i32 ply){
-    if((++search_state.nodes & 2047) == 0) communicate();
+    if((++search_state.nodes && COMUNICATION_CHECK_MASK) == 0) communicate();
     if(search_state.stop) return 0;
     if(ply > MAX_PLY) return evaluate_relative(pos);
 
-    bool checked = pos->checkers != 0;
+    bool checked = in_check(pos);
     i32 stand_pat = -INF_VALUE; // https://chessprogramming.org/Quiescence_Search#standing-pat
     i32 best = -INF_VALUE;
     if(!checked){
@@ -468,11 +490,11 @@ static i32 search_node(position_t* pos, i32 alpha, i32 beta, i32 depth, i32 ply,
     if(has_repeated(pos, search_state.history_from)) return 0;
     if(ply > MAX_PLY) return evaluate_relative(pos);
 
-    bool checked = pos->checkers != 0;
+    bool checked = in_check(pos);
     if(checked && ply < search_state.depth * 2) depth++; // https://www.chessprogramming.org/Check_Extensions with limit
     if(depth <= 0) return quiescence(pos, alpha, beta, ply);
 
-    if((++search_state.nodes & 2047) == 0) communicate();
+    if((++search_state.nodes & COMMUNICATION_CHECK_MASK) == 0) communicate();
     if(search_state.stop) return 0;
 
     move_t tt_move = 0;
@@ -494,7 +516,7 @@ static i32 search_node(position_t* pos, i32 alpha, i32 beta, i32 depth, i32 ply,
     u64 color_pieces_no_pawns = pos->colors[pos->blacks_turn] & ~(pos->pieces[PAWN] | pos->pieces[KING]);
     if(allow_null && !checked && depth >= 3 && color_pieces_no_pawns && evaluate_relative(pos) >= beta){
         do_null_move(pos);
-        i32 r = 3 - (i32)(depth >= 6); // https://chessprogramming.org/Depth_Reduction_R maybe 2 + (i32)(depth >= 6) or 3
+        i32 r = 3 + depth / 6; // https://chessprogramming.org/Depth_Reduction_R  maybe use 2 + (i32)(depth >= 6) or just plain 3
         i32 score = -search_node(pos, -beta, -beta + 1, depth - r, ply + 1, false);
         *pos = start_pos;
 
@@ -550,7 +572,9 @@ static i32 search_node(position_t* pos, i32 alpha, i32 beta, i32 depth, i32 ply,
     return best;
 }
 
-search_result_t search_position(position_t* pos, search_limits_t limits){
+static search_result_t _search_position(position_t* pos, search_limits_t limits){
+    positions_searched++;
+
     limits.max_depth   = clamp(limits.max_depth,   0, MAX_PLY - 1);
     limits.max_time_ms = clamp(limits.max_time_ms, 0, 99999);
     i32 max_depth = limits.max_depth == 0 ? MAX_PLY - 1 : limits.max_depth; // max depth for 0
@@ -562,7 +586,6 @@ search_result_t search_position(position_t* pos, search_limits_t limits){
     search_state.max_nodes = limits.max_nodes;
     search_state.max_time_ms = limits.max_time_ms;
     search_state.history_from = pos->history_count - 1;
-
 
     search_result_t res = { 0 };
 
@@ -580,6 +603,7 @@ search_result_t search_position(position_t* pos, search_limits_t limits){
     position_t start_pos = *pos;
     for(i32 depth = 1; depth <= max_depth; depth++){ // https://chessprogramming.org/Iterative_Deepening
         search_state.depth = depth;
+        search_state.can_stop = depth > 1; // so always a move at depth 1
 
         i32 alpha  = -INF_VALUE;
         i32 best   = -INF_VALUE;
@@ -618,12 +642,24 @@ search_result_t search_position(position_t* pos, search_limits_t limits){
     return res;
 }
 
+search_result_t search_position(position_t* pos, search_limits_t limits){
+    search_result_t res = _search_position(pos, limits);
+
+    bool black = pos->blacks_turn;
+    i32 whites_perspetive = black ? -res.score : res.score;
+    res.score = (res.move == 0 ? (in_check(pos, black) ? -MATE_VALUE : 0) : whites_perspetive);
+
+    return res;
+}
+
 // returns best move for the side to move (0 if there are no legal moves); score is from the mover's perspective
 move_t find_best_move(position_t* pos, i32 depth, i32* out_score){
     search_limits_t limits = { 0 };
     limits.max_depth = depth < 1 ? 1 : depth;
 
-    search_result_t res = search_position(pos, limits);
+    search_result_t res = _search_position(pos, limits);
+
+    printf("Searched %llu nodes at %d depth\n", res.nodes, res.depth);
 
     bool black = pos->blacks_turn;
     i32 whites_perspetive = black ? -res.score : res.score;
