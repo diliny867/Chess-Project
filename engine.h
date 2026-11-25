@@ -11,6 +11,8 @@
 #define MAX_PLY           256
 #define MATE_BOUND_VALUE  (MATE_VALUE - MAX_PLY)
 
+#define PRUNING_DELTA     200
+
 
 // Values from:
 // https://chessprogramming.org/PeSTO%27s_Evaluation_Function
@@ -176,8 +178,8 @@ i32 passed_pawn_increase[64] = {
 // https://web.archive.org/web/20071031100051/http://www.brucemo.com/compchess/programming/hashing.htm
 typedef enum {
     TT_EXACT = 0,
-    TT_ALPHA = 1,
-    TT_BETA  = 2
+    TT_LOWER = 1,
+    TT_UPPER = 2
 } tt_flag_e;
 typedef struct {
     u64 hash;
@@ -230,6 +232,7 @@ static force_inline void check_stop(){
 static force_inline void communicate(){
     check_stop();
 }
+
 
 void clear_tt(){
     zero_array(transposition_table);
@@ -374,6 +377,7 @@ static force_inline i32 score_move(move_t move){
     return score;
 }
 
+
 // moves the best remaining move to index i and returns it, dont sort the rest after a beta cutoff
 static force_inline move_t pick_move(move_t* moves, i32* scores, i32 i, i32 count){
     i32 best = i;
@@ -387,12 +391,14 @@ static force_inline move_t pick_move(move_t* moves, i32* scores, i32 i, i32 coun
 
 // https://www.chessprogramming.org/Quiescence_Search
 static i32 quiescence(position_t* pos, i32 alpha, i32 beta, i32 ply){
-    if(ply >= MAX_PLY - 1) return evaluate_relative(pos);
+    if((++search_state.nodes & 2047) == 0) communicate();
+    if(search_state.stop) return 0;
+    if(ply > MAX_PLY) return evaluate_relative(pos);
 
-    bool in_check = pos->checkers != 0;
+    bool checked = pos->checkers != 0;
     i32 stand_pat = -INF_VALUE; // https://chessprogramming.org/Quiescence_Search#standing-pat
     i32 best = -INF_VALUE;
-    if(!in_check){
+    if(!checked){
         stand_pat = best = evaluate_relative(pos);
         if(best >= beta) return best;
         if(best > alpha) alpha = best;
@@ -400,8 +406,8 @@ static i32 quiescence(position_t* pos, i32 alpha, i32 beta, i32 ply){
 
     move_t moves[MAX_MOVES];
     i32 scores[MAX_MOVES];
-    i32 moves_count = in_check ? get_moves(pos, moves, true) : get_captures(pos, moves);
-    if(in_check && moves_count == 0) return -(MATE_VALUE - ply);
+    i32 moves_count = checked ? get_moves(pos, moves, true) : get_captures(pos, moves);
+    if(checked && moves_count == 0) return -(MATE_VALUE - ply);
     for(i32 i = 0; i < moves_count; i++)
         scores[i] = score_move(moves[i]);
 
@@ -409,17 +415,19 @@ static i32 quiescence(position_t* pos, i32 alpha, i32 beta, i32 ply){
     for(i32 i = 0; i < moves_count; i++){
         move_t move = pick_move(moves, scores, i, moves_count);
         // https://www.chessprogramming.org/Delta_Pruning   TODO: off this for endgame phase
-        if(!in_check && (move_get_type(move) != PROMOTION) && (stand_pat + piece_values_mg[move_get_spec2(move)] + 200 < alpha)) continue;
+        if(!checked && (move_get_type(move) != PROMOTION) && (stand_pat + piece_values_mg[move_get_spec2(move)] + PRUNING_DELTA < alpha)) continue;
 
         do_move_lazy(pos, move);
         i32 score = -quiescence(pos, -beta, -alpha, ply + 1);
         *pos = start_pos;
+        if(search_state.stop) return 0;
 
         if(score > best){
             best = score;
             if(score > alpha){
                 alpha = score;
-                if(score >= beta) break;
+                if(score >= beta)
+                    break;
             }
         }
     }
@@ -428,75 +436,141 @@ static i32 quiescence(position_t* pos, i32 alpha, i32 beta, i32 ply){
 
 
 // negamax with alpha-beta pruning, ply used to prefer faster mates
-i32 alpha_beta(position_t* pos, i32 alpha, i32 beta, i32 depth, i32 ply){
-    move_t moves[MAX_MOVES];
+// i32 alpha_beta(position_t* pos, i32 alpha, i32 beta, i32 depth, i32 ply){
+
+//     if(has_repeated_ply(pos, ply)) return 0;
+//     // if(is_threefold_repetition(pos)) return 0;
+
+//     bool checked = pos->checkers != 0;
+//     move_t moves[MAX_MOVES];
+//     if(depth <= 0){
+//         // only pay for move generation when in check can we be mated and only after 50 moves the draw matters
+//         if(pos->checkers || is_fifty_move_draw(pos)){
+//             if(get_moves(pos, moves, true) == 0) return pos->checkers ? -(MATE_VALUE - ply) : 0;
+//             if(is_fifty_move_draw(pos)) return 0;
+//         }
+//         return evaluate_relative(pos);
+//     }
+
+//     i32 old_alpha = alpha;
+//     move_t tt_move = 0;
+//     transposition_t* tt_entry = read_tt(pos->hash);
+//     if(tt_entry){
+//         tt_move = tt_entry->move;
+//         if(tt_entry->depth >= depth && pos->halfmove_clock < 4){ // && dont cutoff when still can repeat
+//             i32 score = score_from_tt(tt_entry->score, ply);
+//             u8 flag = tt_entry->flag;
+//             if(flag == TT_EXACT)                   return score;
+//             if(flag == TT_UPPER && score <= alpha) return alpha;
+//             if(flag == TT_LOWER && score >= beta)  return beta;
+//         }
+//     }
+
+//     i32 moves_count = get_moves(pos, moves, true);
+//     if(moves_count == 0){
+//         return in_check(pos, pos->blacks_turn) ? -(MATE_VALUE - ply) : 0;
+//     }
+//     if(is_fifty_move_draw(pos)) return 0; // check this after mate: mate on the 100th half move still wins
+
+//     i32 scores[MAX_MOVES];
+//     for(i32 i = 0; i < moves_count; i++)
+//         scores[i] = score_move(moves[i]);
+//     // move best remebered move in front
+//     if(tt_move != 0){
+//         for(i32 i = 0; i < moves_count; i++){
+//             if(moves[i] == tt_move){
+//                 scores[i] = INF_VALUE;
+//                 break;
+//             }
+//         }
+//     }
+
+//     move_t best_move = 0;
+//     position_t start_pos = *pos;
+//     for(i32 i = 0; i < moves_count; i++){
+//         move_t move = pick_move(moves, scores, i, moves_count);
+
+//         do_move_lazy(pos, move);
+//         i32 score = -alpha_beta(pos, -beta, -alpha, depth - 1, ply + 1);
+//         *pos = start_pos;
+
+//         if(score >= beta){
+//             write_tt(pos->hash, move, beta, depth, TT_LOWER, ply);
+//             return beta;
+//         }
+//         if(score > alpha){
+//             best_move = move;
+//             alpha = score;
+//         }
+//     }
+//     write_tt(pos->hash, best_move, alpha, depth, (alpha > old_alpha ? TT_EXACT : TT_UPPER), ply);
+
+//     return alpha;
+// }
+
+// https://www.chessprogramming.org/Fail-Soft
+static i32 search_node(position_t* pos, i32 alpha, i32 beta, i32 depth, i32 ply){
 
     if(has_repeated_ply(pos, ply)) return 0;
-    // if(is_threefold_repetition(pos)) return 0;
+    if(ply > MAX_PLY) return evaluate_relative(pos);
 
-    if(depth <= 0){
-        // only pay for move generation when in check can we be mated and only after 50 moves the draw matters
-        if(pos->checkers || is_fifty_move_draw(pos)){
-            if(get_moves(pos, moves, true) == 0) return pos->checkers ? -(MATE_VALUE - ply) : 0;
-            if(is_fifty_move_draw(pos)) return 0;
-        }
-        return evaluate_relative(pos);
-    }
+    bool checked = pos->checkers != 0;
+    if(checked && ply < search_state.depth * 2) depth++; // https://www.chessprogramming.org/Check_Extensions with limit
+    if(depth <= 0) return quiescence(pos, alpha, beta, ply);
 
-    i32 old_alpha = alpha;
+    if((++search_state.nodes & 2047) == 0) communicate();
+    if(search_state.stop) return 0;
+
     move_t tt_move = 0;
     transposition_t* tt_entry = read_tt(pos->hash);
     if(tt_entry){
         tt_move = tt_entry->move;
-        if(tt_entry->depth >= depth && pos->halfmove_clock < 4){ // && dont cutoff when still can repeat
+        if(tt_entry->depth >= depth && pos->halfmove_clock < 4){
             i32 score = score_from_tt(tt_entry->score, ply);
-            u8 flag = tt_entry->flag;
-            if(flag == TT_EXACT)                   return score;
-            if(flag == TT_ALPHA && score <= alpha) return alpha;
-            if(flag == TT_BETA  && score >= beta)  return beta;
+            i32 flag = tt_entry->flag;
+            if(flag == TT_EXACT)                   return score; // fail-soft
+            if(flag == TT_LOWER && score >= beta)  return score;
+            if(flag == TT_UPPER && score <= alpha) return score;
         }
     }
 
+    move_t moves[MAX_MOVES];
     i32 moves_count = get_moves(pos, moves, true);
-    if(moves_count == 0){
-        return in_check(pos, pos->blacks_turn) ? -(MATE_VALUE - ply) : 0;
-    }
-    if(is_fifty_move_draw(pos)) return 0; // checked after mate: mate on the 100th half move still wins
+    if(moves_count == 0) return checked ? -(MATE_VALUE - ply) : 0;
+    if(is_fifty_move_draw(pos)) return 0; // check this after mate: mate on the 100th half move still wins
 
     i32 scores[MAX_MOVES];
     for(i32 i = 0; i < moves_count; i++)
         scores[i] = score_move(moves[i]);
-    // move best remebered move in front
-    if(tt_move != 0){
-        for(i32 i = 0; i < moves_count; i++){
-            if(moves[i] == tt_move){
-                scores[i] = INF_VALUE;
-                break;
-            }
-        }
-    }
 
+    i32 old_alpha = alpha;
     move_t best_move = 0;
+    i32 best = -INF_VALUE;
     position_t start_pos = *pos;
     for(i32 i = 0; i < moves_count; i++){
         move_t move = pick_move(moves, scores, i, moves_count);
 
         do_move_lazy(pos, move);
-        i32 score = -alpha_beta(pos, -beta, -alpha, depth - 1, ply + 1);
+        i32 score = -search_node(pos, -beta, -alpha, depth - 1, ply + 1);
         *pos = start_pos;
 
-        if(score >= beta){
-            write_tt(pos->hash, move, beta, depth, TT_BETA, ply);
-            return beta;
-        }
-        if(score > alpha){
+        if(search_state.stop) return 0;
+
+        if(score > best){
+            best = score;
             best_move = move;
-            alpha = score;
+            if(score > alpha){
+                alpha = score;
+                if(alpha >= beta)
+                    break;
+            }
         }
     }
-    write_tt(pos->hash, best_move, alpha, depth, (alpha > old_alpha ? TT_EXACT : TT_ALPHA), ply);
 
-    return alpha;
+    tt_flag_e flag = best >= beta ? TT_LOWER : (best > old_alpha ? TT_EXACT : TT_UPPER);
+    write_tt(pos->hash, flag == TT_UPPER ? 0 : best_move, alpha, depth, flag, ply);
+
+    return best;
 }
 
 search_result_t search_position(position_t* pos, search_limits_t limits){
@@ -504,7 +578,7 @@ search_result_t search_position(position_t* pos, search_limits_t limits){
     limits.max_time_ms = clamp(limits.max_time_ms, 0, 99999);
     i32 max_depth = limits.max_depth == 0 ? MAX_PLY - 1 : limits.max_depth; // max depth for 0
 
-    clear_tt();
+    // reset_engine();
 
     search_state = { 0 };
     search_state.start_ms = clock();
@@ -535,7 +609,7 @@ search_result_t search_position(position_t* pos, search_limits_t limits){
         for(i32 i = 0; i < moves_count; i++){
             move_t move = moves[i];
             do_move_lazy(pos, move);
-            score = -alpha_beta(pos, -INF_VALUE, -alpha, depth - 1, 1);
+            score = -search_node(pos, -INF_VALUE, -alpha, depth - 1, 1);
             *pos = start_pos;
 
             if(search_state.stop) break;

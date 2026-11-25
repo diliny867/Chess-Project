@@ -805,10 +805,10 @@ static force_inline u64 attackers_to(position_t* pos, bool black, i32 index, u64
            | (rook_moves(board, index)   & (pieces[ROOK]   | pieces[QUEEN])) ) & other_pieces;
 }
 
-bool in_check(position_t* pos){
+inline bool in_check(position_t* pos){
     return pos->checkers != 0;
 }
-bool in_check(position_t* pos, bool black){
+inline bool in_check(position_t* pos, bool black){
     if(black == pos->blacks_turn){
         return pos->checkers != 0;
     }
@@ -1172,10 +1172,10 @@ bool has_repeated(position_t* pos, i32 tree_start){
     return false;
 }
 // has_repeated but derive tree_start from ply
-bool has_repeated_ply(position_t* pos, i32 ply){
+inline bool has_repeated_ply(position_t* pos, i32 ply){
     return has_repeated(pos, pos->history_count - ply);
 }
-bool is_threefold_repetition(position_t* pos){
+inline bool is_threefold_repetition(position_t* pos){
     i32 count = 1;
     i32 lowest = pos->history_count - pos->halfmove_clock;
     if(lowest < 0) lowest = 0;
