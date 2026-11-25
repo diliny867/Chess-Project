@@ -11,6 +11,9 @@
 #define MAX_PLY           256
 #define MATE_BOUND_VALUE  (MATE_VALUE - MAX_PLY)
 
+#define TT_MOVE_VALUE     MATE_VALUE
+#define MAX_HISTORY_VALUE 10000
+
 #define PRUNING_DELTA     200
 
 
@@ -200,7 +203,9 @@ typedef struct {
     u64 max_nodes;
     clock_t start_ms;
     i32 max_time_ms;
+    i32 history_from;                  // initial pos.history_count - 1
     i32 depth;                         // also check so we dont stop on depth == 1
+    i32 history[CCOLOR_COUNT][64][64]; // https://chessprogramming.org/History_Heuristic
     bool stop;
 } search_state_t;
 search_state_t search_state;
@@ -233,6 +238,19 @@ static force_inline void communicate(){
     check_stop();
 }
 
+static inline void update_history(move_t move, i32 bonus){
+    i32* entry = &search_state.history[move_get_color(move)][move_get_from(move)][move_get_to(move)];
+    bonus = clamp(bonus, -MAX_HISTORY_VALUE, MAX_HISTORY_VALUE);
+    *entry += bonus - *entry * abs(bonus) / MAX_HISTORY_VALUE;
+}
+// https://chessprogramming.org/Beta-Cutoff
+static inline void quiet_cutoff(move_t move, i32 ply, i32 depth, move_t* tried, i32 count){
+    i32 bonus = min(70 * depth - 40, 1000);
+    update_history(move, bonus);    // reward this move
+    for(i32 i = 0; i < count; i++){ // punish other moves
+        if(tried[i] != move) update_history(tried[i], -bonus);
+    }
+}
 
 void clear_tt(){
     zero_array(transposition_table);
@@ -376,6 +394,16 @@ static force_inline i32 score_move(move_t move){
     }
     return score;
 }
+// https://chessprogramming.org/Quiet_Moves
+static force_inline bool move_is_quiet(move_t move){
+    move_type_e type = move_get_type(move);
+    return type == MOVE || type == PUSH || type == DOUBLE_PUSH || type == CASTLING;
+}
+static force_inline i32 score_search_move(move_t move, move_t tt_move, i32 ply){
+    if(move == tt_move)      return TT_MOVE_VALUE; // https://www.chessprogramming.org/Hash_Move
+    if(!move_is_quiet(move)) return score_move(move);
+    return search_state.history[move_get_color(move)][move_get_from(move)][move_get_to(move)]; // https://www.chessprogramming.org/History_Heuristic
+}
 
 
 // moves the best remaining move to index i and returns it, dont sort the rest after a beta cutoff
@@ -434,84 +462,10 @@ static i32 quiescence(position_t* pos, i32 alpha, i32 beta, i32 ply){
     return best;
 }
 
-
-// negamax with alpha-beta pruning, ply used to prefer faster mates
-// i32 alpha_beta(position_t* pos, i32 alpha, i32 beta, i32 depth, i32 ply){
-
-//     if(has_repeated_ply(pos, ply)) return 0;
-//     // if(is_threefold_repetition(pos)) return 0;
-
-//     bool checked = pos->checkers != 0;
-//     move_t moves[MAX_MOVES];
-//     if(depth <= 0){
-//         // only pay for move generation when in check can we be mated and only after 50 moves the draw matters
-//         if(pos->checkers || is_fifty_move_draw(pos)){
-//             if(get_moves(pos, moves, true) == 0) return pos->checkers ? -(MATE_VALUE - ply) : 0;
-//             if(is_fifty_move_draw(pos)) return 0;
-//         }
-//         return evaluate_relative(pos);
-//     }
-
-//     i32 old_alpha = alpha;
-//     move_t tt_move = 0;
-//     transposition_t* tt_entry = read_tt(pos->hash);
-//     if(tt_entry){
-//         tt_move = tt_entry->move;
-//         if(tt_entry->depth >= depth && pos->halfmove_clock < 4){ // && dont cutoff when still can repeat
-//             i32 score = score_from_tt(tt_entry->score, ply);
-//             u8 flag = tt_entry->flag;
-//             if(flag == TT_EXACT)                   return score;
-//             if(flag == TT_UPPER && score <= alpha) return alpha;
-//             if(flag == TT_LOWER && score >= beta)  return beta;
-//         }
-//     }
-
-//     i32 moves_count = get_moves(pos, moves, true);
-//     if(moves_count == 0){
-//         return in_check(pos, pos->blacks_turn) ? -(MATE_VALUE - ply) : 0;
-//     }
-//     if(is_fifty_move_draw(pos)) return 0; // check this after mate: mate on the 100th half move still wins
-
-//     i32 scores[MAX_MOVES];
-//     for(i32 i = 0; i < moves_count; i++)
-//         scores[i] = score_move(moves[i]);
-//     // move best remebered move in front
-//     if(tt_move != 0){
-//         for(i32 i = 0; i < moves_count; i++){
-//             if(moves[i] == tt_move){
-//                 scores[i] = INF_VALUE;
-//                 break;
-//             }
-//         }
-//     }
-
-//     move_t best_move = 0;
-//     position_t start_pos = *pos;
-//     for(i32 i = 0; i < moves_count; i++){
-//         move_t move = pick_move(moves, scores, i, moves_count);
-
-//         do_move_lazy(pos, move);
-//         i32 score = -alpha_beta(pos, -beta, -alpha, depth - 1, ply + 1);
-//         *pos = start_pos;
-
-//         if(score >= beta){
-//             write_tt(pos->hash, move, beta, depth, TT_LOWER, ply);
-//             return beta;
-//         }
-//         if(score > alpha){
-//             best_move = move;
-//             alpha = score;
-//         }
-//     }
-//     write_tt(pos->hash, best_move, alpha, depth, (alpha > old_alpha ? TT_EXACT : TT_UPPER), ply);
-
-//     return alpha;
-// }
-
 // https://www.chessprogramming.org/Fail-Soft
-static i32 search_node(position_t* pos, i32 alpha, i32 beta, i32 depth, i32 ply){
+static i32 search_node(position_t* pos, i32 alpha, i32 beta, i32 depth, i32 ply, bool allow_null){
 
-    if(has_repeated_ply(pos, ply)) return 0;
+    if(has_repeated(pos, search_state.history_from)) return 0;
     if(ply > MAX_PLY) return evaluate_relative(pos);
 
     bool checked = pos->checkers != 0;
@@ -534,6 +488,21 @@ static i32 search_node(position_t* pos, i32 alpha, i32 beta, i32 depth, i32 ply)
         }
     }
 
+    position_t start_pos = *pos;
+
+    // https://www.chessprogramming.org/Null_Move_Pruning so passing the turn gives a score above beta, position is good
+    u64 color_pieces_no_pawns = pos->colors[pos->blacks_turn] & ~(pos->pieces[PAWN] | pos->pieces[KING]);
+    if(allow_null && !checked && depth >= 3 && color_pieces_no_pawns && evaluate_relative(pos) >= beta){
+        do_null_move(pos);
+        i32 r = 3 - (i32)(depth >= 6); // https://chessprogramming.org/Depth_Reduction_R maybe 2 + (i32)(depth >= 6) or 3
+        i32 score = -search_node(pos, -beta, -beta + 1, depth - r, ply + 1, false);
+        *pos = start_pos;
+
+        if(search_state.stop) return 0;
+        if(score >= beta && score < MATE_BOUND_VALUE) return score;
+        // if(null_score >= beta) return null_score >= MATE_BOUND_VALUE ? beta : null_score;
+    }
+
     move_t moves[MAX_MOVES];
     i32 moves_count = get_moves(pos, moves, true);
     if(moves_count == 0) return checked ? -(MATE_VALUE - ply) : 0;
@@ -541,28 +510,36 @@ static i32 search_node(position_t* pos, i32 alpha, i32 beta, i32 depth, i32 ply)
 
     i32 scores[MAX_MOVES];
     for(i32 i = 0; i < moves_count; i++)
-        scores[i] = score_move(moves[i]);
+        scores[i] = score_search_move(moves[i], tt_move, ply);
 
+    move_t quiets[64];
+    i32 quiets_count = 0;
     i32 old_alpha = alpha;
     move_t best_move = 0;
     i32 best = -INF_VALUE;
-    position_t start_pos = *pos;
     for(i32 i = 0; i < moves_count; i++){
         move_t move = pick_move(moves, scores, i, moves_count);
+        bool quiet = move_is_quiet(move);
 
         do_move_lazy(pos, move);
-        i32 score = -search_node(pos, -beta, -alpha, depth - 1, ply + 1);
+        i32 score = -search_node(pos, -beta, -alpha, depth - 1, ply + 1, true);
         *pos = start_pos;
 
         if(search_state.stop) return 0;
+
+        if(quiet && quiets_count < 64)
+            quiets[quiets_count++] = move;
 
         if(score > best){
             best = score;
             best_move = move;
             if(score > alpha){
                 alpha = score;
-                if(alpha >= beta)
+                if(score >= beta){
+                    if(quiet)
+                        quiet_cutoff(move, ply, depth, quiets, quiets_count);
                     break;
+                }
             }
         }
     }
@@ -584,6 +561,8 @@ search_result_t search_position(position_t* pos, search_limits_t limits){
     search_state.start_ms = clock();
     search_state.max_nodes = limits.max_nodes;
     search_state.max_time_ms = limits.max_time_ms;
+    search_state.history_from = pos->history_count - 1;
+
 
     search_result_t res = { 0 };
 
@@ -594,7 +573,7 @@ search_result_t search_position(position_t* pos, search_limits_t limits){
 
     i32 scores[MAX_MOVES];
     for(i32 i = 0; i < moves_count; i++)
-        scores[i] = score_move(moves[i]);
+        scores[i] = score_search_move(moves[i], 0, 0);
     for(i32 i = 0; i < moves_count; i++)
         pick_move(moves, scores, i, moves_count); // sort now, so dont resort every depth iteration
 
@@ -609,7 +588,7 @@ search_result_t search_position(position_t* pos, search_limits_t limits){
         for(i32 i = 0; i < moves_count; i++){
             move_t move = moves[i];
             do_move_lazy(pos, move);
-            score = -search_node(pos, -INF_VALUE, -alpha, depth - 1, 1);
+            score = -search_node(pos, -INF_VALUE, -alpha, depth - 1, 1, true);
             *pos = start_pos;
 
             if(search_state.stop) break;

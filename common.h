@@ -27,8 +27,13 @@ typedef double f64;
 #define minv(a, b) ((a) < (b) ? (a) : (b))
 #define maxv(a, b) ((a) > (b) ? (a) : (b))
 
-i32 clamp(i32 value, i32 min, i32 max){
+force_inline i32 clamp(i32 value, i32 min, i32 max){
     if(value < min) return min;
     if(value > max) return max;
     return value;
+}
+
+force_inline i32 min(i32 a, i32 b){
+    if(a < b) return a;
+    return b;
 }
