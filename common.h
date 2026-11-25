@@ -24,5 +24,11 @@ typedef double f64;
 #define force_inline __attribute__((always_inline)) inline
 #define unreachable  __builtin_unreachable()
 
-#define min(a, b) (a) < (b) ? (a) : (b);
-#define max(a, b) (a) > (b) ? (a) : (b);
+#define minv(a, b) ((a) < (b) ? (a) : (b))
+#define maxv(a, b) ((a) > (b) ? (a) : (b))
+
+i32 clamp(i32 value, i32 min, i32 max){
+    if(value < min) return min;
+    if(value > max) return max;
+    return value;
+}

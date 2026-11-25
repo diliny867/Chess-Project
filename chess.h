@@ -383,13 +383,13 @@ i32 get_dist_to_edge(i32 index, i32 direction){
     case -8:
         return r;
     case 7:
-        return min(7 - r, f);
+        return minv(7 - r, f);
     case 9:
-        return min(7 - r, 7 - f);
+        return minv(7 - r, 7 - f);
     case -7:
-        return min(r, 7 - f);
+        return minv(r, 7 - f);
     case -9:
-        return min(r, f);
+        return minv(r, f);
     }
     return 0;
 }

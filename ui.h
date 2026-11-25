@@ -161,11 +161,6 @@ void load_assets(){
     sounds[SOUND_GAME_END]   = LoadSound("resources/game-end.mp3");
 }
 
-i32 maxv(i32 a, i32 b){
-    if(a > b) return a;
-    return b;
-}
-
 void index_to_position(i32 index, i32* x, i32* y){
     *x = (index & 7) * SQUARE_SIDE;
     *y = SCREEN_HEIGHT - SQUARE_SIDE - ((index >> 3) * SQUARE_SIDE);
