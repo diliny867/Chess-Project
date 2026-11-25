@@ -1,13 +1,15 @@
 #pragma once
 
 #include "chess.h"
+#include "notations.h"
 
 #include <time.h>
 
 
 #define INF_VALUE    2000000
 #define MATE_VALUE   1000000
-#define MATE_BOUND   (MATE_VALUE - 10000)
+#define MAX_PLY      256
+#define MATE_BOUND   (MATE_VALUE - MAX_PLY)
 
 // Values from:
 // https://chessprogramming.org/PeSTO%27s_Evaluation_Function
@@ -347,35 +349,47 @@ static inline move_t pick_move(move_t* moves, i32* scores, i32 i, i32 count){
     return move;
 }
 
-u64 total_moves = 0;
+// https://www.chessprogramming.org/Quiescence_Search
+static i32 quiescence(position_t* pos, i32 alpha, i32 beta, i32 ply){
+    if(ply >= MAX_PLY - 1) return evaluate_relative(pos);
 
-// plain negamax
-i32 nega_max(position_t* pos, i32 depth) {
-    if (depth == 0) return evaluate_relative(pos);
+    bool in_check = pos->checkers != 0;
+    i32 stand_pat = -INF_VALUE; // https://chessprogramming.org/Quiescence_Search#standing-pat
+    i32 best = -INF_VALUE;
+    if(!in_check){
+        stand_pat = best = evaluate_relative(pos);
+        if(best >= beta) return best;
+        if(best > alpha) alpha = best;
+    }
 
     move_t moves[MAX_MOVES];
-
-    i32 score, best = -INF_VALUE;
-    i32 moves_count = get_moves(pos, moves, true);
-    if(depth == 1){
-        total_moves += moves_count;
-    }
-    if(moves_count == 0){
-        return in_check(pos, pos->blacks_turn) ? -MATE_VALUE - depth : 0; // checkmate or stalemate
-    }
+    i32 scores[MAX_MOVES];
+    i32 moves_count = in_check ? get_moves(pos, moves, true) : get_captures(pos, moves);
+    if(in_check && moves_count == 0) return -(MATE_VALUE - ply);
+    for(i32 i = 0; i < moves_count; i++)
+        scores[i] = move_order_score(moves[i]);
 
     position_t start_pos = *pos;
-    for (i32 i = 0; i < moves_count; i++) {
-        do_move_lazy(pos, moves[i]);
-        score = -nega_max(pos, depth - 1);
+    for(i32 i = 0; i < moves_count; i++){
+        move_t move = pick_move(moves, scores, i, moves_count);
+        // https://www.chessprogramming.org/Delta_Pruning   TODO: off this for endgame phase
+        if(!in_check && (move_get_type(move) != PROMOTION) && (stand_pat + piece_values_mg[move_get_spec2(move)] + 200 < alpha)) continue;
+
+        do_move_lazy(pos, move);
+        i32 score = -quiescence(pos, -beta, -alpha, ply + 1);
         *pos = start_pos;
 
-        if(score > best)
+        if(score > best){
             best = score;
+            if(score > alpha){
+                alpha = score;
+                if(score >= beta) break;
+            }
+        }
     }
-
     return best;
 }
+
 
 // negamax with alpha-beta pruning, ply used to prefer faster mates
 i32 alpha_beta(position_t* pos, i32 alpha, i32 beta, i32 depth, i32 ply){
@@ -398,7 +412,7 @@ i32 alpha_beta(position_t* pos, i32 alpha, i32 beta, i32 depth, i32 ply){
     transposition_t* tt_entry = read_tt(pos->hash);
     if(tt_entry){
         tt_move = tt_entry->move;
-        if(tt_entry->depth >= depth){
+        if(tt_entry->depth >= depth && pos->halfmove_clock < 4){ // && dont cutoff when still can repeat
             i32 score = score_from_tt(tt_entry->score, ply);
             u8 flag = tt_entry->flag;
             if(flag == TT_EXACT)                   return score;
@@ -450,6 +464,8 @@ i32 alpha_beta(position_t* pos, i32 alpha, i32 beta, i32 depth, i32 ply){
 
 // returns best move for the side to move (0 if there are no legal moves); score is from the mover's perspective
 move_t find_best_move(position_t* pos, i32 depth, i32* out_score){
+    clear_tt();
+
     move_t moves[MAX_MOVES];
     if(depth < 1) depth = 1;
 
@@ -483,6 +499,7 @@ move_t find_best_move(position_t* pos, i32 depth, i32* out_score){
     return best_move;
 }
 
+
 // perft: number of leaf nodes, for verifying move generation
 u64 perft(position_t* pos, i32 depth){
     if(depth == 0) return 0;
@@ -499,16 +516,17 @@ u64 perft(position_t* pos, i32 depth){
     }
     return nodes;
 }
-
 // https://en.wikipedia.org/wiki/Shannon_number
 u64 possible_moves[] = { 0, 20, 400, 8902, 197281, 4865609, 119060324, 3195901860, 84998978956, 2439530234167, 69352859712417 };
-
-bool check_moves_at_depth(position_t* pos, i32 depth){
+bool perft_at_depth(i32 depth){
     assert(depth <= 10);
 
-    printf("Evaluating from %s perspective\n", pos->blacks_turn ? "blacks" : "whites");
+    char* fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    position_t pos = parse_fen(fen, put_piece);
+
+    printf("Evaluating from start position: %s\n", fen);
     // clock_t begin = clock();
-    u64 total_moves = perft(pos, depth);
+    u64 total_moves = perft(&pos, depth);
     // clock_t end = clock();
     // printf("Runtime: %lldms\n", (long long)(end - begin) * 1000 / CLOCKS_PER_SEC);
 
@@ -518,6 +536,35 @@ bool check_moves_at_depth(position_t* pos, i32 depth){
     return diff == 0;
 }
 
+
+u64 total_moves = 0;
+// plain negamax
+i32 nega_max(position_t* pos, i32 depth) {
+    if (depth == 0) return evaluate_relative(pos);
+
+    move_t moves[MAX_MOVES];
+
+    i32 score, best = -INF_VALUE;
+    i32 moves_count = get_moves(pos, moves, true);
+    if(depth == 1){
+        total_moves += moves_count;
+    }
+    if(moves_count == 0){
+        return in_check(pos, pos->blacks_turn) ? -MATE_VALUE - depth : 0; // checkmate or stalemate
+    }
+
+    position_t start_pos = *pos;
+    for (i32 i = 0; i < moves_count; i++) {
+        do_move_lazy(pos, moves[i]);
+        score = -nega_max(pos, depth - 1);
+        *pos = start_pos;
+
+        if(score > best)
+            best = score;
+    }
+
+    return best;
+}
 // negamax from the start position; also compares the leaf count with the known perft numbers
 i32 get_score(position_t* pos, i32 depth){
     assert(depth <= 10);

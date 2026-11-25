@@ -248,7 +248,7 @@ typedef struct {
     bool full_setup_pending; // pins and enemy attacks not calculated yet, see do_move_lazy and ensure_setup
     i32 halfmove_clock;      // 50 move rule
     i32 history_count;       // number of entries of position_history that belong to this position
-    u64 hash;                // hash of the current position, same as position_history[history_count - 1]
+    u64 hash;                // hash of the current position, same as position_history[history_count]
 } position_t;
 
 // Hashes of all positions of the current game or search
@@ -1280,7 +1280,7 @@ void do_move_lazy(position_t* pos, move_t move){
     pos->full_setup_pending = true;
     pos->turns_passed++;
 
-    if(pos->history_count < MAX_HISTORY){
+    if(pos->history_count < MAX_HISTORY-1){
         position_history[++pos->history_count] = pos->hash;
     }
 }
@@ -1302,7 +1302,7 @@ void do_null_move(position_t* pos){
     pos->full_setup_pending = true;
     pos->turns_passed++;
 
-    if(pos->history_count < MAX_HISTORY){
+    if(pos->history_count < MAX_HISTORY-1){
         position_history[++pos->history_count] = pos->hash;
     }
 }

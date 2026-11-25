@@ -1068,12 +1068,11 @@ void poll_events(position_t* pos){
 
     if(IsKeyPressed(KEY_T) && engine_active){
         printf("Static material evaluation: %d\n", evaluate_relative(pos));
-        i32 depth = 6; // https://en.wikipedia.org/wiki/Shannon_number
-        //printf("Engine evaluation: %llu at %d depth\n", get_score(pos, depth), depth);
+        i32 depth = 7; // https://en.wikipedia.org/wiki/Shannon_number
 
-        printf("Checking moves at %d depth\n", depth);
+        printf("Perft at %d depth\n", depth);
         clock_t begin = clock();
-        bool success = check_moves_at_depth(pos, depth);
+        bool success = perft_at_depth(depth);
         clock_t end = clock();
         printf(success ? "Success\n" : "Failure\n");
 
@@ -1096,8 +1095,6 @@ void poll_events(position_t* pos){
 
         printf("Best move with score: %d is: ", score);
         printf("%s\n", best_move_pgn);
-        // print_move(move);
-        // printf("\n");
 
         printf("Runtime: %lldms\n", (long long)(end - begin) * 1000 / CLOCKS_PER_SEC);
 
