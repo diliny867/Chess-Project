@@ -218,6 +218,8 @@ typedef struct {
     i32 depth;                         // also check so we dont stop on depth == 1
     move_t killers[MAX_PLY][2];        // https://chessprogramming.org/Killer_Heuristic
     i32 history[CCOLOR_COUNT][64][64]; // https://chessprogramming.org/History_Heuristic
+    move_t pv[MAX_PLY][MAX_PLY];       // https://chessprogramming.org/Triangular_PV-Table two dim array to avoid index calculations
+    i32 pv_length[MAX_PLY];            // avoids null move check
     bool can_stop;
     bool stop;
 } search_state_t;
@@ -465,6 +467,7 @@ static force_inline move_t pick_move(move_t* moves, i32* scores, i32 i, i32 coun
 
 // https://www.chessprogramming.org/Quiescence_Search
 static i32 quiescence(position_t* pos, i32 alpha, i32 beta, i32 ply){
+    search_state.pv_length[ply] = 0;
     if((++search_state.nodes & COMMUNICATION_CHECK_MASK) == 0) communicate();
     if(search_state.stop) return 0;
     if(ply > MAX_PLY) return evaluate_relative(pos);
@@ -510,7 +513,7 @@ static i32 quiescence(position_t* pos, i32 alpha, i32 beta, i32 ply){
 
 // https://www.chessprogramming.org/Fail-Soft
 static i32 search_node(position_t* pos, i32 alpha, i32 beta, i32 depth, i32 ply, bool allow_null){
-
+    search_state.pv_length[ply] = 0;
     if(has_repeated(pos, search_state.history_from)) return 0;
     if(ply > MAX_PLY) return evaluate_relative(pos);
 
@@ -521,11 +524,12 @@ static i32 search_node(position_t* pos, i32 alpha, i32 beta, i32 depth, i32 ply,
     if((++search_state.nodes & COMMUNICATION_CHECK_MASK) == 0) communicate();
     if(search_state.stop) return 0;
 
+    bool pv = beta - alpha > 1;
     move_t tt_move = 0;
     transposition_t* tt_entry = read_tt(pos->hash);
     if(tt_entry){
         tt_move = tt_entry->move;
-        if(tt_entry->depth >= depth && pos->halfmove_clock < 4){
+        if(!pv && tt_entry->depth >= depth){
             i32 score = score_from_tt(tt_entry->score, ply);
             i32 flag = tt_entry->flag;
             if(flag == TT_EXACT)                   return score; // fail-soft
@@ -538,7 +542,7 @@ static i32 search_node(position_t* pos, i32 alpha, i32 beta, i32 depth, i32 ply,
 
     // https://www.chessprogramming.org/Null_Move_Pruning so passing the turn gives a score above beta, position is good
     u64 color_pieces_no_pawns = pos->colors[pos->blacks_turn] & ~(pos->pieces[PAWN] | pos->pieces[KING]);
-    if(allow_null && !checked && depth >= 3 && color_pieces_no_pawns && evaluate_relative(pos) >= beta){
+    if(allow_null && !pv && !checked && depth >= 3 && color_pieces_no_pawns && evaluate_relative(pos) >= beta){
         do_null_move(pos);
         i32 r = 3 + depth / 6; // https://chessprogramming.org/Depth_Reduction_R  maybe use 2 + (i32)(depth >= 6) or just plain 3
         i32 score = -search_node(pos, -beta, -beta + 1, depth - r, ply + 1, false);
@@ -596,6 +600,11 @@ static i32 search_node(position_t* pos, i32 alpha, i32 beta, i32 depth, i32 ply,
             best_move = move;
             if(score > alpha){
                 alpha = score;
+                if(pv){
+                    search_state.pv[ply][0] = move;
+                    memcpy(&search_state.pv[ply][1], search_state.pv[ply + 1], search_state.pv_length[ply + 1] * sizeof(move_t));
+                    search_state.pv_length[ply] = search_state.pv_length[ply + 1] + 1;
+                }
                 if(score >= beta){
                     if(quiet)
                         quiet_cutoff(move, ply, depth, quiets, quiets_count);
