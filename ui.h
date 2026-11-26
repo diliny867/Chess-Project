@@ -9,6 +9,9 @@
 #define RAYGUI_IMPLEMENTATION
 #include "raygui.h"
 
+
+#define ENGINE_DEFAULT_ACTIVATE 1
+
 #define NUL_INDEX (-1)
 
 i32 mouse_x = 0;
@@ -43,7 +46,7 @@ arrow_t dragged_arrow = { 0, 0 };
 bool doing_arrow = false;
 
 i32 evaluation_bar = 0;
-i32 engine_active = 0;
+i32 engine_active = ENGINE_DEFAULT_ACTIVATE;
 move_t best_move = 0;
 i32 depth_searched = 0;
 char best_move_pgn[10] = { 0 };
@@ -128,6 +131,7 @@ Sound sounds[SOUND_COUNT];
 #define EVAL_BAR_BACKGROUND (Color){0x28, 0x28, 0x28, 0xFF}
 // #define EVAL_BLACK          (Color){0x10, 0x10, 0x10, 0xFF}
 #define EVAL_BLACK          (Color){0x8F, 0x8F, 0x8F, 0xFF}
+#define EVAL_GRAY         (Color){0xAF, 0xAF, 0xAF, 0xFF}
 #define EVAL_WHITE          (Color){0xEF, 0xEF, 0xEF, 0xFF}
 
 #define PLAYED_TURNS_PANEL_BACKGROUND (Color){0x28, 0x28, 0x28, 0xFF}
@@ -264,7 +268,8 @@ void load_start_position(position_t* pos){
 
 void ui_start_search(position_t* pos){
     i32 depth = 50;
-    search_limits_t limits = { 0, 30000, depth }; // nodes, milliseconds, depth
+    i32 seconds = 30;
+    search_limits_t limits = { 0, seconds * 1000, depth }; // nodes, milliseconds, depth
     search_started = true;
     start_search(pos, limits);
 }
@@ -458,6 +463,9 @@ void draw_selected(position_t* pos){
         }
         draw_piece(mouse_x - HALF_SQUARE_SIDE, mouse_y - HALF_SQUARE_SIDE, selected_black, dragged_piece);
     }
+    // else{
+    //     draw_piece_by_index(selected_index, selected_black, selected_piece);
+    // }
 }
 void draw_check(position_t* pos){
     if(in_check(pos)){
@@ -626,8 +634,8 @@ void draw_eval_bar(position_t* pos){
     }
     DrawText(eval_text, eval_number_x_pos, eval_number_y_pos, font_size, EVAL_WHITE);
 
-    Color depth_color = is_search_running() ? EVAL_WHITE : EVAL_BLACK;
-    const char* depth_text = TextFormat("%d", depth_searched);
+    Color depth_color = is_search_running() ? EVAL_GRAY : EVAL_BLACK;
+    const char* depth_text = TextFormat("D %d", depth_searched);
     i32 depth_font_size = 18;
     i32 depth_x_offset = MeasureText(eval_text, font_size) + 8;
     DrawText(depth_text, eval_number_x_pos + depth_x_offset, eval_number_y_pos + depth_font_size, depth_font_size, depth_color);
@@ -635,7 +643,7 @@ void draw_eval_bar(position_t* pos){
     Color best_move_color = best_move_for_black ? EVAL_BLACK : EVAL_WHITE;
     i32 old_text_size = GuiGetStyle(DEFAULT, TEXT_SIZE);
     i32 best_move_font_size = 20;
-    i32 best_move_x_pos = eval_number_x_pos + 120; // SCREEN_BOARD_SIZE + SCREEN_EVAL_WIDTH + 50;
+    i32 best_move_x_pos = eval_number_x_pos + 130; // SCREEN_BOARD_SIZE + SCREEN_EVAL_WIDTH + 120;
     i32 best_move_y_pos = eval_number_y_pos + font_size - best_move_font_size + 2; // 74;
     char best_move_text[20] = { 0 };
     i32 icon_id = pgn_to_icon_id(best_move_pgn[0]);
@@ -851,7 +859,7 @@ void draw_help_menu(){
     i32 y_pos = 80;
     i32 y_inc = font_size + 20;
     DrawText("H to open/close this menu", x_pos, post_increase(&y_pos, y_inc), font_size, EVAL_WHITE);
-    DrawText("M mute sounds", x_pos, post_increase(&y_pos, y_inc), font_size, EVAL_WHITE);
+    DrawText("M to mute sounds", x_pos, post_increase(&y_pos, y_inc), font_size, EVAL_WHITE);
     DrawText("LEFT/RIGHT to move around in move history", x_pos, post_increase(&y_pos, y_inc), font_size, EVAL_WHITE);
     DrawText("UP/DOWN to go to first/last move in move history", x_pos, post_increase(&y_pos, y_inc), font_size, EVAL_WHITE);
     DrawText("R to reset current game to start position", x_pos, post_increase(&y_pos, y_inc), font_size, EVAL_WHITE);
