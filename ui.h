@@ -574,6 +574,11 @@ i32 pgn_to_icon_id(char pgn){
     default:  return ICON_PAWN;
     }
 }
+
+f32 ease_value(f32 val, f32 target, f32 dt, f32 speed){
+    f32 t = 1.f - expf(-speed * dt);
+    return val + (target - val) * t;
+}
 // https://lichess.org/page/accuracy
 f32 calculate_eval_white_percent(i32 eval){
     return 0.5f + 0.5f * (2.f / (1.f + exp(-0.00368208f * eval)) - 1.f);
@@ -587,7 +592,9 @@ void draw_eval_bar(position_t* pos){
     // f32 roundness = 1.f;
     // i32 roundned_side_size = eval_width * roundness;
 
-    f32 white_eval_percent = calculate_eval_white_percent(evaluation_bar);
+    f32 white_eval_target = calculate_eval_white_percent(evaluation_bar);
+    static f32 white_eval_percent = 0.5f;
+    white_eval_percent = ease_value(white_eval_percent, white_eval_target, GetFrameTime(), 12.f);
     i32 white_eval_height = white_eval_percent * eval_height;
 
     // DrawRectangle(SCREEN_BOARD_SIZE, 0, SCREEN_EVAL_WIDTH, SCREEN_HEIGHT, EVAL_BACKGROUND);
@@ -608,7 +615,7 @@ void draw_eval_bar(position_t* pos){
     }else if(game_state == CHECKMATE){
         eval_text = "M";
     }else if(evaluation_bar >= MATE_BOUND_VALUE || evaluation_bar <= -MATE_BOUND_VALUE){
-        i32 mate_moves = (MATE_VALUE - abs(evaluation_bar)) / 2 + 1;
+        i32 mate_moves = (MATE_VALUE - abs(evaluation_bar) - 1) / 2 + 1;
         eval_text = TextFormat(evaluation_bar > 0 ? "M%d" : "M-%d", mate_moves);
     }else{
         eval_text = TextFormat("%c%.1f", (eval_number >= 0) ? '+' : '-', fabsf(eval_number));
@@ -982,10 +989,7 @@ void play_move(position_t* pos, i32 new_index, i32 arg){
         }
     }
 
-    // before doing the move
-    save_halfmove(pos, move);
-
-    do_move(pos, move);
+    ui_do_move(pos, move);
 
     after_move(pos);
 
@@ -1033,27 +1037,6 @@ void poll_events(position_t* pos){
     if(IsKeyPressed(KEY_M)){
         if(GetMasterVolume() == 0.0f) SetMasterVolume(1.0f);
         else                          SetMasterVolume(0.0f);
-    }
-
-    if(IsKeyPressed(KEY_R)){
-        PlaySound(sounds[SOUND_GAME_START]);
-        restart_game(pos);
-        return;
-    }
-    if(IsKeyPressed(KEY_DOWN)){
-        load_first_halfmove_sound(pos);
-    }
-    if(IsKeyPressed(KEY_LEFT) || IsKeyPressedRepeat(KEY_LEFT)){
-        load_previous_halfmove_sound(pos);
-    }
-    if(IsKeyPressed(KEY_RIGHT) || IsKeyPressedRepeat(KEY_RIGHT)){
-        load_next_halfmove_sound(pos);
-    }
-    if(IsKeyPressed(KEY_UP)){
-        load_last_halfmove_sound(pos);
-    }
-    if(IsKeyPressed(KEY_E) || IsKeyPressedRepeat(KEY_E)){
-        load_best_move(pos);
     }
 
     if(IsKeyPressed(KEY_P)){
@@ -1129,6 +1112,29 @@ void poll_events(position_t* pos){
         if(best_move_for_black) evaluation_bar = -res.score;
         if(!is_search_running()) search_started = false;
     }
+
+    // check these after if(search_started) to fix eval bar jumping
+    if(IsKeyPressed(KEY_R)){
+        PlaySound(sounds[SOUND_GAME_START]);
+        restart_game(pos);
+        return;
+    }
+    if(IsKeyPressed(KEY_DOWN)){
+        load_first_halfmove_sound(pos);
+    }
+    if(IsKeyPressed(KEY_LEFT) || IsKeyPressedRepeat(KEY_LEFT)){
+        load_previous_halfmove_sound(pos);
+    }
+    if(IsKeyPressed(KEY_RIGHT) || IsKeyPressedRepeat(KEY_RIGHT)){
+        load_next_halfmove_sound(pos);
+    }
+    if(IsKeyPressed(KEY_UP)){
+        load_last_halfmove_sound(pos);
+    }
+    if(IsKeyPressed(KEY_E) || IsKeyPressedRepeat(KEY_E)){
+        load_best_move(pos);
+    }
+
 
     // return before mouse events if on end screen
     if(game_state != GAME){
