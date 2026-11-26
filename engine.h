@@ -3,6 +3,10 @@
 #include "chess.h"
 #include "notations.h"
 
+#include <Seqlock.h>
+
+#include <thread>
+#include <atomic>
 #include <time.h>
 
 
@@ -232,6 +236,12 @@ typedef struct {
     i32 time_ms;
     i32 depth;
 } search_result_t;
+rigtorp::Seqlock<search_result_t> public_res; // we have one writer and one reader, with seqlock writer never blocks
+
+std::thread search_thread;
+std::atomic<bool> search_running{false};
+std::atomic<bool> search_stop_requested{false};
+
 
 void print_search_result(position_t* pos, search_result_t res){
     printf("%3d search result:\n", positions_searched);
@@ -246,12 +256,23 @@ static force_inline i32 search_time_elapsed_ms(){
 }
 static force_inline void check_stop(){
     if(!search_state.can_stop) return;
-    if((search_state.max_nodes && search_state.nodes >= search_state.max_nodes) || (search_state.max_time_ms && search_time_elapsed_ms() >= search_state.max_time_ms)){
+    if((search_state.max_nodes && search_state.nodes >= search_state.max_nodes) || (search_state.max_time_ms && search_time_elapsed_ms() >= search_state.max_time_ms) || search_stop_requested.load()){
         search_state.stop = true;
     }
 }
+
+bool is_search_running(){
+    return search_running.load();
+}
+// void request_search_stop(){
+//     search_stop_requested.store(true);
+// }
+
 static inline void communicate(){
     check_stop();
+}
+search_result_t poll_current_result(){
+    return public_res.load();
 }
 
 static inline void update_history(move_t move, i32 bonus){
@@ -336,12 +357,13 @@ void init_piece_tables(){
         passed_pawn_masks[CBLACK][i] = blacks_mask;
     }
 }
-void init_engine(){
-    init_piece_tables();
-    clear_tt();
-}
 void reset_engine(){
     clear_tt();
+    public_res.store({0, 0, 0, 0, 0});
+}
+void init_engine(){
+    init_piece_tables();
+    reset_engine();
 }
 
 // material from the point of view of the side to move
@@ -575,6 +597,8 @@ static i32 search_node(position_t* pos, i32 alpha, i32 beta, i32 depth, i32 ply,
 static search_result_t _search_position(position_t* pos, search_limits_t limits){
     positions_searched++;
 
+    public_res.store({0, 0, 0, 0, 0});
+
     limits.max_depth   = clamp(limits.max_depth,   0, MAX_PLY - 1);
     limits.max_time_ms = clamp(limits.max_time_ms, 0, 99999);
     i32 max_depth = limits.max_depth == 0 ? MAX_PLY - 1 : limits.max_depth; // max depth for 0
@@ -624,6 +648,7 @@ static search_result_t _search_position(position_t* pos, search_limits_t limits)
                 res.move = move;
                 res.score = score;
                 res.depth = depth;
+                public_res.store(res);
             }
         }
         if(search_state.stop) break;
@@ -638,6 +663,7 @@ static search_result_t _search_position(position_t* pos, search_limits_t limits)
 
     res.nodes = search_state.nodes;
     res.time_ms = search_time_elapsed_ms();
+    public_res.store(res);
 
     return res;
 }
@@ -645,27 +671,51 @@ static search_result_t _search_position(position_t* pos, search_limits_t limits)
 search_result_t search_position(position_t* pos, search_limits_t limits){
     search_result_t res = _search_position(pos, limits);
 
-    bool black = pos->blacks_turn;
-    i32 whites_perspetive = black ? -res.score : res.score;
-    res.score = (res.move == 0 ? (in_check(pos, black) ? -MATE_VALUE : 0) : whites_perspetive);
+    // bool black = pos->blacks_turn;
+    // i32 whites_perspetive = black ? -res.score : res.score;
+    // res.score = (res.move == 0 ? (in_check(pos, black) ? -MATE_VALUE : 0) : whites_perspetive);
 
     return res;
 }
 
-// returns best move for the side to move (0 if there are no legal moves); score is from the mover's perspective
-move_t find_best_move(position_t* pos, i32 depth, i32* out_score){
-    search_limits_t limits = { 0 };
-    limits.max_depth = depth < 1 ? 1 : depth;
-
-    search_result_t res = _search_position(pos, limits);
-
-    printf("Searched %llu nodes at %d depth\n", res.nodes, res.depth);
-
-    bool black = pos->blacks_turn;
-    i32 whites_perspetive = black ? -res.score : res.score;
-    if(out_score) *out_score = (res.move == 0 ? (in_check(pos, black) ? -MATE_VALUE : 0) : whites_perspetive);
-    return res.move;
+void stop_search(){
+    if(search_thread.joinable()){
+        search_stop_requested.store(true);
+        search_thread.join();
+    }
 }
+void start_search(position_t* pos, search_limits_t limits){
+    stop_search();
+    search_running.store(true);
+    search_stop_requested.store(false);
+
+    position_t local_pos = *pos;
+    search_thread = std::thread([local_pos, limits]() mutable { // copy these by value
+        search_result_t res = _search_position(&local_pos, limits);
+        public_res.store(res);
+        search_running.store(false);
+    });
+}
+
+void clean_engine(){
+    stop_search();
+}
+
+
+// returns best move for the side to move (0 if there are no legal moves); score is from the mover's perspective
+// move_t find_best_move(position_t* pos, i32 depth, i32* out_score){
+//     search_limits_t limits = { 0 };
+//     limits.max_depth = depth < 1 ? 1 : depth;
+
+//     search_result_t res = _search_position(pos, limits);
+
+//     printf("Searched %llu nodes at %d depth\n", res.nodes, res.depth);
+
+//     bool black = pos->blacks_turn;
+//     i32 whites_perspetive = black ? -res.score : res.score;
+//     if(out_score) *out_score = (res.move == 0 ? (in_check(pos, black) ? -MATE_VALUE : 0) : whites_perspetive);
+//     return res.move;
+// }
 
 
 // perft: number of leaf nodes, for verifying move generation

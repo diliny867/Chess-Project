@@ -45,6 +45,7 @@ i32 engine_active = 0;
 move_t best_move = 0;
 char best_move_pgn[10] = { 0 };
 bool best_move_for_black = false;
+bool search_started = false;
 
 Rectangle played_turns_panel_view = { 0 };
 Vector2 played_turns_panel_scroll = { 0 };
@@ -256,6 +257,16 @@ void load_start_position(position_t* pos){
     setup_position(pos);
 }
 
+void ui_start_search(position_t* pos){
+    i32 depth = 50;
+    search_limits_t limits = { 0, 30000, depth }; // nodes, milliseconds, depth
+    search_started = true;
+    start_search(pos, limits);
+}
+void ui_stop_search(){
+    stop_search();
+}
+
 void after_move(position_t* pos){
     if(halfmoves_at > 0) select_for_turn_highlight(halfmoves[halfmoves_at - 1]);
     else deselect_for_turn_highlight();
@@ -271,6 +282,7 @@ void after_move(position_t* pos){
         return;
     }else{
         game_state = GAME;
+        ui_start_search(pos);
     }
 }
 
@@ -590,8 +602,13 @@ void draw_eval_bar(position_t* pos){
     i32 eval_number_y_pos = eval_y_offset + 4;
     i32 font_size = 30;
     const char* eval_text;
-    if(evaluation_bar >= MATE_VALUE/2 || evaluation_bar <= -MATE_VALUE/2){
+    if(game_state == DRAW){
+        eval_text = "D";
+    }else if(game_state == CHECKMATE){
         eval_text = "M";
+    }else if(evaluation_bar >= MATE_BOUND_VALUE || evaluation_bar <= -MATE_BOUND_VALUE){
+        i32 mate_moves = (MATE_VALUE - abs(evaluation_bar)) / 2 + 1;
+        eval_text = TextFormat("M-%d", mate_moves);
     }else{
         eval_text = TextFormat("%c%.1f", (eval_number >= 0) ? '+' : '-', fabsf(eval_number));
     }
@@ -619,7 +636,10 @@ void draw_eval(position_t* pos){
     }
 
     i32 toggle_engine_slider_x_pos = SCREEN_BOARD_SIZE + SCREEN_EVAL_WIDTH + 280;
-    GuiToggleSlider((Rectangle){ toggle_engine_slider_x_pos, 18, 64, 32 }, TextFormat("#%d#;#%d#", ICON_CROSS, ICON_OK_TICK), &engine_active);
+    if(GuiToggleSlider((Rectangle){ toggle_engine_slider_x_pos, 18, 64, 32 }, TextFormat("#%d#;#%d#", ICON_CROSS, ICON_OK_TICK), &engine_active)){
+        if(engine_active) ui_start_search(pos); // engine activated
+        else              ui_stop_search();
+    }
 
     // GuiSetStyle(SLIDER, SLIDER_PADDING, 2);
     // GuiToggleSlider((Rectangle){ 900, 480 + 20, 140, 30 }, "ON;OFF", &engine_active);
@@ -776,16 +796,16 @@ void draw_controls(position_t* pos){
     i32 buttons_y_bottom_offset = 100;
 
     GuiSetIconScale(buttons_scale);
-    if(GuiIconButtonActivatable((Rectangle){ buttons_x_pos, SCREEN_BOARD_SIZE - buttons_y_bottom_offset, buttons_size, buttons_size }, ICON_PLAYER_PREVIOUS, true) && game_state == GAME){
+    if(GuiIconButtonActivatable((Rectangle){ buttons_x_pos, SCREEN_BOARD_SIZE - buttons_y_bottom_offset, buttons_size, buttons_size }, ICON_PLAYER_PREVIOUS, true)/* && game_state == GAME*/){
         load_first_halfmove_sound(pos);
     }
-    if(GuiIconButtonActivatable((Rectangle){ buttons_x_pos + buttons_x_advance, SCREEN_BOARD_SIZE - buttons_y_bottom_offset, buttons_size, buttons_size }, ICON_UNDO, true) && game_state == GAME){
+    if(GuiIconButtonActivatable((Rectangle){ buttons_x_pos + buttons_x_advance, SCREEN_BOARD_SIZE - buttons_y_bottom_offset, buttons_size, buttons_size }, ICON_UNDO, true)/* && game_state == GAME*/){
         load_previous_halfmove_sound(pos);
     }
-    if(GuiIconButtonActivatable((Rectangle){ buttons_x_pos + buttons_x_advance*2, SCREEN_BOARD_SIZE - buttons_y_bottom_offset, buttons_size, buttons_size }, ICON_REDO, true) && game_state == GAME){
+    if(GuiIconButtonActivatable((Rectangle){ buttons_x_pos + buttons_x_advance*2, SCREEN_BOARD_SIZE - buttons_y_bottom_offset, buttons_size, buttons_size }, ICON_REDO, true)/* && game_state == GAME*/){
         load_next_halfmove_sound(pos);
     }
-    if(GuiIconButtonActivatable((Rectangle){ buttons_x_pos + buttons_x_advance*3, SCREEN_BOARD_SIZE - buttons_y_bottom_offset, buttons_size, buttons_size }, ICON_PLAYER_NEXT, true) && game_state == GAME){
+    if(GuiIconButtonActivatable((Rectangle){ buttons_x_pos + buttons_x_advance*3, SCREEN_BOARD_SIZE - buttons_y_bottom_offset, buttons_size, buttons_size }, ICON_PLAYER_NEXT, true)/* && game_state == GAME*/){
         load_last_halfmove_sound(pos);
     }
 }
@@ -1024,7 +1044,7 @@ void poll_events(position_t* pos){
     if(IsKeyPressed(KEY_UP)){
         load_last_halfmove_sound(pos);
     }
-        if(IsKeyPressed(KEY_E)){
+    if(IsKeyPressed(KEY_E) || IsKeyPressedRepeat(KEY_E)){
         load_best_move(pos);
     }
 
@@ -1036,6 +1056,7 @@ void poll_events(position_t* pos){
             *pos = parse_pgn(clipboard, ui_do_move);
             if(halfmoves_at > 0)
                 select_for_turn_highlight(halfmoves[halfmoves_at - 1]);
+            if(engine_active) ui_start_search(pos);
             PlaySound(sounds[SOUND_GAME_START]);
         }else{
             char* pgn = moves_to_pgn(pos, halfmoves, halfmoves_count);
@@ -1052,6 +1073,7 @@ void poll_events(position_t* pos){
             clear_halfmoves();
             *pos = parse_fen(clipboard, ui_put_piece);
             setup_game(pos);
+            if(engine_active) ui_start_search(pos);
             PlaySound(sounds[SOUND_GAME_START]);
         }else{
             char* fen = position_to_fen(pos);
@@ -1074,23 +1096,30 @@ void poll_events(position_t* pos){
         printf("Runtime: %lldms\n", (long long)(end - begin) * 1000 / CLOCKS_PER_SEC);
     }
 
-    if((IsKeyPressed(KEY_SPACE) || (IsKeyPressedRepeat(KEY_SPACE) && IsKeyDown(KEY_LEFT_SHIFT))) && engine_active){
+    if((IsKeyPressed(KEY_SPACE)/* || (IsKeyPressedRepeat(KEY_SPACE) && IsKeyDown(KEY_LEFT_SHIFT))*/) && engine_active){
         printf("Static material evaluation: %d\n", evaluate_relative(pos));
-        i32 depth = 10;
 
-        search_limits_t limits = { 0, 5000, depth }; // nodes, seconds, depth
+        // search_result_t res = search_position(pos, limits);
+        // print_search_result(pos, res);
 
-        search_result_t res = search_position(pos, limits);
-        print_search_result(pos, res);
+        // best_move = res.move;
+        // write_move_pgn(best_move_pgn, pos, best_move);
+        // evaluation_bar = res.score;
+        // best_move_for_black = pos->blacks_turn;
 
+        // if(IsKeyDown(KEY_LEFT_SHIFT)){
+        //     load_best_move(pos);
+        // }
+    }
+    if(search_started){
+        search_result_t res = poll_current_result();
+        // print_search_result(pos, res);
         best_move = res.move;
         write_move_pgn(best_move_pgn, pos, best_move);
-        evaluation_bar = res.score;
         best_move_for_black = pos->blacks_turn;
-
-        if(IsKeyDown(KEY_LEFT_SHIFT)){
-            load_best_move(pos);
-        }
+        evaluation_bar = res.score;
+        if(best_move_for_black) evaluation_bar = -res.score;
+        if(!is_search_running()) search_started = false;
     }
 
     // return before mouse events if on end screen
