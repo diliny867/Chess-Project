@@ -31,6 +31,8 @@ i32 promoted_to = NUL_INDEX;
 i32 promotion_indexes[4] = { NUL_INDEX, NUL_INDEX, NUL_INDEX, NUL_INDEX };
 piece_t promotion_pieces[4] = { QUEEN, KNIGHT, ROOK, BISHOP };
 
+bool help_menu_open = false;
+
 typedef struct {
     i32 from, to;
 } arrow_t;
@@ -109,6 +111,8 @@ Sound sounds[SOUND_COUNT];
 #define SELECTED_COLOR (Color){0x71, 0x81, 0x68, 0xFF}
 //#define ARROW_COLOR    (Color){0x6D, 0x7F, 0x58, 0xAF}
 #define ARROW_COLOR    (Color){0xC7, 0xC1, 0x10, 0xAF}
+
+#define HELP_TINT      (Color){0x61, 0x71, 0x58, 0xBF}
 
 #define MOVE_HIGHLIGHT  (Color){0xF7, 0xF1, 0x1D, 0x50}
 #define MOVE_HIGHLIGHT2 (Color){0x8B, 0xCE, 0xF7, 0x6F}
@@ -594,7 +598,7 @@ void draw_eval_bar(position_t* pos){
 
     f32 white_eval_target = calculate_eval_white_percent(evaluation_bar);
     static f32 white_eval_percent = 0.5f;
-    white_eval_percent = ease_value(white_eval_percent, white_eval_target, GetFrameTime(), 12.f);
+    white_eval_percent = ease_value(white_eval_percent, white_eval_target, GetFrameTime(), 4.f);
     i32 white_eval_height = white_eval_percent * eval_height;
 
     // DrawRectangle(SCREEN_BOARD_SIZE, 0, SCREEN_EVAL_WIDTH, SCREEN_HEIGHT, EVAL_BACKGROUND);
@@ -823,12 +827,48 @@ void draw_controls(position_t* pos){
         load_last_halfmove_sound(pos);
     }
 }
+void draw_help_tooltip(){
+    i32 font_size = 18;
+    char* tooltip_text = "Press H to open help menu";
+    i32 text_width = MeasureText(tooltip_text, font_size);
+    i32 x_pos = SCREEN_BOARD_SIZE + SCREEN_EVAL_WIDTH + (SCREEN_CONTROLS_WIDTH - text_width) / 2;
+    i32 y_pos = SCREEN_HEIGHT - 24;
+    DrawText(tooltip_text, x_pos, y_pos, font_size, EVAL_BLACK);
+}
+
+i32 post_increase(i32* val, i32 inc){
+    i32 res = *val;
+    *val += inc;
+    return res;
+}
+void draw_help_menu(){
+    if(!help_menu_open) return;
+
+    DrawRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, HELP_TINT);
+
+    i32 font_size = 40;
+    i32 x_pos = 60;
+    i32 y_pos = 80;
+    i32 y_inc = font_size + 20;
+    DrawText("H to open/close this menu", x_pos, post_increase(&y_pos, y_inc), font_size, EVAL_WHITE);
+    DrawText("M mute sounds", x_pos, post_increase(&y_pos, y_inc), font_size, EVAL_WHITE);
+    DrawText("LEFT/RIGHT to move around in move history", x_pos, post_increase(&y_pos, y_inc), font_size, EVAL_WHITE);
+    DrawText("UP/DOWN to go to first/last move in move history", x_pos, post_increase(&y_pos, y_inc), font_size, EVAL_WHITE);
+    DrawText("R to reset current game to start position", x_pos, post_increase(&y_pos, y_inc), font_size, EVAL_WHITE);
+    DrawText("E to play best engine calculated move", x_pos, post_increase(&y_pos, y_inc), font_size, EVAL_WHITE);
+    DrawText("F to store FEN notation to clipboard", x_pos, post_increase(&y_pos, y_inc), font_size, EVAL_WHITE);
+    DrawText("LSHIFT + F to load FEN notation from clipboard", x_pos, post_increase(&y_pos, y_inc), font_size, EVAL_WHITE);
+    DrawText("P to store PGN notation to clipboard", x_pos, post_increase(&y_pos, y_inc), font_size, EVAL_WHITE);
+    DrawText("LSHIFT + P to load PGN notation from clipboard", x_pos, post_increase(&y_pos, y_inc), font_size, EVAL_WHITE);
+    DrawText("C to start/stop evaluation", x_pos, post_increase(&y_pos, y_inc), font_size, EVAL_WHITE);
+}
 void draw_menu(position_t* pos){
     DrawRectangle(SCREEN_BOARD_SIZE, 0, SCREEN_MENU_WIDTH, SCREEN_HEIGHT, MENU_BACKGROUND);
 
     draw_eval(pos);
     draw_played_turns(pos);
     draw_controls(pos);
+    draw_help_tooltip();
 }
 
 
@@ -1039,6 +1079,10 @@ void poll_events(position_t* pos){
         else                          SetMasterVolume(0.0f);
     }
 
+    if(IsKeyPressed(KEY_H)){
+        help_menu_open = !help_menu_open;
+    }
+
     if(IsKeyPressed(KEY_P)){
         if(IsKeyDown(KEY_LEFT_SHIFT)){ // load instead if shift held shift
             char* clipboard = (char*)GetClipboardText();
@@ -1073,34 +1117,34 @@ void poll_events(position_t* pos){
         }
     }
 
-    if(IsKeyPressed(KEY_T) && engine_active){
-        printf("Static material evaluation: %d\n", evaluate_relative(pos));
-        i32 depth = 7; // https://en.wikipedia.org/wiki/Shannon_number
+    // if(IsKeyPressed(KEY_T) && engine_active){
+    //     printf("Static material evaluation: %d\n", evaluate_relative(pos));
+    //     i32 depth = 7; // https://en.wikipedia.org/wiki/Shannon_number
 
-        printf("Perft at %d depth\n", depth);
-        clock_t begin = clock();
-        bool success = perft_at_depth(depth);
-        clock_t end = clock();
-        printf(success ? "Success\n" : "Failure\n");
+    //     printf("Perft at %d depth\n", depth);
+    //     clock_t begin = clock();
+    //     bool success = perft_at_depth(depth);
+    //     clock_t end = clock();
+    //     printf(success ? "Success\n" : "Failure\n");
 
-        printf("Runtime: %lldms\n", (long long)(end - begin) * 1000 / CLOCKS_PER_SEC);
-    }
+    //     printf("Runtime: %lldms\n", (long long)(end - begin) * 1000 / CLOCKS_PER_SEC);
+    // }
 
-    if((IsKeyPressed(KEY_SPACE)/* || (IsKeyPressedRepeat(KEY_SPACE) && IsKeyDown(KEY_LEFT_SHIFT))*/) && engine_active){
-        printf("Static material evaluation: %d\n", evaluate_relative(pos));
+    // if((IsKeyPressed(KEY_SPACE)/* || (IsKeyPressedRepeat(KEY_SPACE) && IsKeyDown(KEY_LEFT_SHIFT))*/) && engine_active){
+    //     printf("Static material evaluation: %d\n", evaluate_relative(pos));
 
-        // search_result_t res = search_position(pos, limits);
-        // print_search_result(pos, res);
+    //     // search_result_t res = search_position(pos, limits);
+    //     // print_search_result(pos, res);
 
-        // best_move = res.move;
-        // write_move_pgn(best_move_pgn, pos, best_move);
-        // evaluation_bar = res.score;
-        // best_move_for_black = pos->blacks_turn;
+    //     // best_move = res.move;
+    //     // write_move_pgn(best_move_pgn, pos, best_move);
+    //     // evaluation_bar = res.score;
+    //     // best_move_for_black = pos->blacks_turn;
 
-        // if(IsKeyDown(KEY_LEFT_SHIFT)){
-        //     load_best_move(pos);
-        // }
-    }
+    //     // if(IsKeyDown(KEY_LEFT_SHIFT)){
+    //     //     load_best_move(pos);
+    //     // }
+    // }
     if(search_started){
         search_result_t res = poll_current_result();
         // print_search_result(pos, res);
@@ -1111,6 +1155,12 @@ void poll_events(position_t* pos){
         evaluation_bar = res.score;
         if(best_move_for_black) evaluation_bar = -res.score;
         if(!is_search_running()) search_started = false;
+    }
+
+    if(IsKeyPressed(KEY_C)){
+        engine_active = !engine_active;
+        if(engine_active) ui_start_search(pos);
+        else              ui_stop_search();
     }
 
     // check these after if(search_started) to fix eval bar jumping
@@ -1202,7 +1252,7 @@ void poll_events(position_t* pos){
     }
 }
 
-void draw_position(position_t* pos){
+void draw_all(position_t* pos){
     BeginDrawing();
 
         ClearBackground(RAYWHITE);
@@ -1220,6 +1270,8 @@ void draw_position(position_t* pos){
             draw_end_screen(pos);
         }
 
+        draw_help_menu();
+
     EndDrawing();
 }
 
@@ -1235,7 +1287,7 @@ void chess_ui_run(){
     while (!WindowShouldClose()){
         poll_events(&position);
 
-        draw_position(&position);
+        draw_all(&position);
     }
 
     clean_draw();
