@@ -43,6 +43,7 @@ bool doing_arrow = false;
 i32 evaluation_bar = 0;
 i32 engine_active = 0;
 move_t best_move = 0;
+i32 depth_searched = 0;
 char best_move_pgn[10] = { 0 };
 bool best_move_for_black = false;
 bool search_started = false;
@@ -608,11 +609,17 @@ void draw_eval_bar(position_t* pos){
         eval_text = "M";
     }else if(evaluation_bar >= MATE_BOUND_VALUE || evaluation_bar <= -MATE_BOUND_VALUE){
         i32 mate_moves = (MATE_VALUE - abs(evaluation_bar)) / 2 + 1;
-        eval_text = TextFormat("M-%d", mate_moves);
+        eval_text = TextFormat(evaluation_bar > 0 ? "M%d" : "M-%d", mate_moves);
     }else{
         eval_text = TextFormat("%c%.1f", (eval_number >= 0) ? '+' : '-', fabsf(eval_number));
     }
     DrawText(eval_text, eval_number_x_pos, eval_number_y_pos, font_size, EVAL_WHITE);
+
+    Color depth_color = is_search_running() ? EVAL_WHITE : EVAL_BLACK;
+    const char* depth_text = TextFormat("%d", depth_searched);
+    i32 depth_font_size = 18;
+    i32 depth_x_offset = MeasureText(eval_text, font_size) + 8;
+    DrawText(depth_text, eval_number_x_pos + depth_x_offset, eval_number_y_pos + depth_font_size, depth_font_size, depth_color);
 
     Color best_move_color = best_move_for_black ? EVAL_BLACK : EVAL_WHITE;
     i32 old_text_size = GuiGetStyle(DEFAULT, TEXT_SIZE);
@@ -985,7 +992,7 @@ void play_move(position_t* pos, i32 new_index, i32 arg){
     play_move_sound(pos, move);
 }
 
-void setup_game(position_t* pos){
+void setup_game(position_t* pos, bool can_start_engine = true){
     game_state = GAME;
     arrows_count = 0;
     select_for_turn_highlight(NUL_INDEX, NUL_INDEX);
@@ -993,6 +1000,7 @@ void setup_game(position_t* pos){
     start_position = *pos;
     setup_position(pos);
     reset_engine();
+    if(can_start_engine && engine_active) ui_start_search(pos);
 }
 void reset_engine_ui(){
     // engine_active = 0;
@@ -1006,10 +1014,10 @@ void clear_halfmoves(){
     halfmoves_at = 0;
     reset_engine_ui();
 }
-void restart_game(position_t* pos){
+void restart_game(position_t* pos, bool can_start_engine = true){
     reset_position(pos);
     clear_halfmoves();
-    setup_game(pos);
+    setup_game(pos, can_start_engine);
 }
 
 void poll_events(position_t* pos){
@@ -1052,7 +1060,7 @@ void poll_events(position_t* pos){
         if(IsKeyDown(KEY_LEFT_SHIFT)){ // load instead if shift held shift
             char* clipboard = (char*)GetClipboardText();
             printf("Clipboard: <%s>\n", clipboard);
-            restart_game(pos);
+            restart_game(pos, false);
             *pos = parse_pgn(clipboard, ui_do_move);
             if(halfmoves_at > 0)
                 select_for_turn_highlight(halfmoves[halfmoves_at - 1]);
@@ -1073,7 +1081,6 @@ void poll_events(position_t* pos){
             clear_halfmoves();
             *pos = parse_fen(clipboard, ui_put_piece);
             setup_game(pos);
-            if(engine_active) ui_start_search(pos);
             PlaySound(sounds[SOUND_GAME_START]);
         }else{
             char* fen = position_to_fen(pos);
@@ -1115,6 +1122,7 @@ void poll_events(position_t* pos){
         search_result_t res = poll_current_result();
         // print_search_result(pos, res);
         best_move = res.move;
+        depth_searched = res.depth;
         write_move_pgn(best_move_pgn, pos, best_move);
         best_move_for_black = pos->blacks_turn;
         evaluation_bar = res.score;
