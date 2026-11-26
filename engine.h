@@ -3,10 +3,12 @@
 #include "chess.h"
 #include "notations.h"
 
+// https://github.com/rigtorp/Seqlock
 #include <Seqlock.h>
 
 #include <thread>
 #include <atomic>
+#include <math.h>
 #include <time.h>
 
 
@@ -544,7 +546,7 @@ static i32 search_node(position_t* pos, i32 alpha, i32 beta, i32 depth, i32 ply,
 
         if(search_state.stop) return 0;
         if(score >= beta && score < MATE_BOUND_VALUE) return score;
-        // if(null_score >= beta) return null_score >= MATE_BOUND_VALUE ? beta : null_score;
+        // if(score >= beta) return score >= MATE_BOUND_VALUE ? beta : score;
     }
 
     move_t moves[MAX_MOVES];
@@ -566,7 +568,22 @@ static i32 search_node(position_t* pos, i32 alpha, i32 beta, i32 depth, i32 ply,
         bool quiet = move_is_quiet(move);
 
         do_move_lazy(pos, move);
-        i32 score = -search_node(pos, -beta, -alpha, depth - 1, ply + 1, true);
+        // i32 score = -search_node(pos, -beta, -alpha, depth - 1, ply + 1, true);
+
+        // https://chessprogramming.org/Principal_Variation_Search
+        i32 score;
+        if(i == 0){
+            score = -search_node(pos, -beta, -alpha, depth - 1, ply + 1, true);
+        }else{
+            // https://www.chessprogramming.org/Late_Move_Reductions
+            i32 reduction = 0;
+            if(depth >= 3 && i >= 3 && quiet && !checked){
+                reduction = (i32)(0.99 + log((double)depth) * log((double)i) / 3.14);
+            }
+            score = -search_node(pos, -alpha - 1, -alpha, depth - 1 - reduction, ply + 1, true);
+            if(score > alpha && reduction > 0) score = -search_node(pos, -alpha - 1, -alpha, depth - 1, ply + 1, true);
+            if(score > alpha && score < beta)  score = -search_node(pos, -beta, -alpha, depth - 1, ply + 1, true);
+        }
         *pos = start_pos;
 
         if(search_state.stop) return 0;
@@ -629,14 +646,23 @@ static search_result_t _search_position(position_t* pos, search_limits_t limits)
         search_state.depth = depth;
         search_state.can_stop = depth > 1; // so always a move at depth 1
 
+        res = { 0 };
         i32 alpha  = -INF_VALUE;
         i32 best   = -INF_VALUE;
         i32 best_i = 0;
-        i32 score  = 0;
         for(i32 i = 0; i < moves_count; i++){
             move_t move = moves[i];
             do_move_lazy(pos, move);
-            score = -search_node(pos, -INF_VALUE, -alpha, depth - 1, 1, true);
+            // i32 score = -search_node(pos, -INF_VALUE, -alpha, depth - 1, 1, true);
+
+            // https://chessprogramming.org/Principal_Variation_Search fail-soft
+            i32 score;
+            if(i == 0){
+                score = -search_node(pos, -INF_VALUE, -alpha, depth - 1, 1, true);
+            }else{
+                score = -search_node(pos, -alpha - 1, -alpha, depth - 1, 1, true);
+                if(score > alpha) score = -search_node(pos, -INF_VALUE, -alpha, depth - 1, 1, true);
+            }
             *pos = start_pos;
 
             if(search_state.stop) break;
@@ -651,7 +677,14 @@ static search_result_t _search_position(position_t* pos, search_limits_t limits)
                 public_res.store(res);
             }
         }
-        if(search_state.stop) break;
+        if(search_state.stop){
+            // some moves were aborted but other need to be checked
+            if(res.move != 0 && depth > 1){
+                res.depth = depth - 1; // last fully finished depth
+                public_res.store(res);
+            }
+            break;
+        }
         if(res.score >= MATE_BOUND_VALUE && (MATE_VALUE - res.score <= depth)) break; // found shortest mate (it fits in depth (that iteratively increases))
         if(moves_count == 1 && limits.max_time_ms) break; // 1 move, so dont think if dont need to
 
