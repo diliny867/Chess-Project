@@ -177,15 +177,25 @@ i32 gamephase_increase[PIECE_MAX] = { 0, 0, 1, 1, 2, 4, 0 };
 // https://web.archive.org/web/20180714011607/https://www.stmintz.com/ccc/index.php?id=341763
 // & this mask with enemy pawns mask to check if any prevent passing pawn
 u64 passed_pawn_masks[CCOLOR_COUNT][64] = { 0 };
-i32 passed_pawn_increase[64] = {
-      0,   0,   0,   0,   0,   0,   0,   0,
-      0,   0,   0,   0,   0,   0,   0,   0,
-     90,  90,  90,  90,  90,  90,  90,  90,
-     60,  60,  60,  60,  60,  60,  60,  60,
-     50,  50,  50,  50,  50,  50,  50,  50,
-     40,  40,  40,  40,  40,  40,  40,  40,
-     30,  30,  30,  30,  30,  30,  30,  30,
-      0,   0,   0,   0,   0,   0,   0,   0,
+i32 passed_pawn_increase[CCOLOR_COUNT][64] = {{
+          0,   0,   0,   0,   0,   0,   0,   0,
+          0,   0,   0,   0,   0,   0,   0,   0,
+         90,  90,  90,  90,  90,  90,  90,  90,
+         60,  60,  60,  60,  60,  60,  60,  60,
+         50,  50,  50,  50,  50,  50,  50,  50,
+         40,  40,  40,  40,  40,  40,  40,  40,
+         30,  30,  30,  30,  30,  30,  30,  30,
+          0,   0,   0,   0,   0,   0,   0,   0,
+    }, {
+          0,   0,   0,   0,   0,   0,   0,   0,
+         30,  30,  30,  30,  30,  30,  30,  30,
+         40,  40,  40,  40,  40,  40,  40,  40,
+         50,  50,  50,  50,  50,  50,  50,  50,
+         60,  60,  60,  60,  60,  60,  60,  60,
+         90,  90,  90,  90,  90,  90,  90,  90,
+          0,   0,   0,   0,   0,   0,   0,   0,
+          0,   0,   0,   0,   0,   0,   0,   0,
+    }
 };
 
 
@@ -381,7 +391,17 @@ static inline i32 evaluate_relative(position_t* pos) {
     i32 phase = 0;
 
     for(i32 c = CWHITE; c <= CBLACK; c++){
-        for(piece_t p = PIECE_FROM; p < PIECE_MAX; p++){
+        u64 other_mask = pieces[PAWN] & colors[!c];
+        u64 mask       = pieces[PAWN] & colors[c];
+        while(mask){
+            i32 index = extract_piece(&mask);
+            i32 passed_pawn = (i32)!(passed_pawn_masks[c][index] & other_mask); // no blocking pawns for our pawns
+            mg[c] += piece_values_table_mg[c][PAWN][index] + passed_pawn * passed_pawn_increase[c][index];
+            eg[c] += piece_values_table_eg[c][PAWN][index] + passed_pawn * passed_pawn_increase[c][index];
+            // phase += gamephase_increase[PAWN]; // += 0
+        }
+
+        for(piece_t p = PAWN+1; p < PIECE_MAX; p++){
             u64 mask = pieces[p] & colors[c];
             while(mask){
                 i32 index = extract_piece(&mask);
