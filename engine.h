@@ -172,31 +172,22 @@ i32* pesto_tables_eg[PIECE_MAX] = {
     0, pawn_increase_eg, knight_increase_eg, bishop_increase_eg, rook_increase_eg, queen_increase_eg, king_increase_eg
 };
 i32 gamephase_increase[PIECE_MAX] = { 0, 0, 1, 1, 2, 4, 0 };
-#define whites_as_blacks_index(index) ((index) ^ 56)
+#define whites_index(index) ((index) ^ 56)
 
 // https://web.archive.org/web/20180714011607/https://www.stmintz.com/ccc/index.php?id=341763
 // & this mask with enemy pawns mask to check if any prevent passing pawn
 u64 passed_pawn_masks[CCOLOR_COUNT][64] = { 0 };
-i32 passed_pawn_increase[CCOLOR_COUNT][64] = {{
-          0,   0,   0,   0,   0,   0,   0,   0,
-          0,   0,   0,   0,   0,   0,   0,   0,
-         90,  90,  90,  90,  90,  90,  90,  90,
-         60,  60,  60,  60,  60,  60,  60,  60,
-         50,  50,  50,  50,  50,  50,  50,  50,
-         40,  40,  40,  40,  40,  40,  40,  40,
-         30,  30,  30,  30,  30,  30,  30,  30,
-          0,   0,   0,   0,   0,   0,   0,   0,
-    }, {
-          0,   0,   0,   0,   0,   0,   0,   0,
-         30,  30,  30,  30,  30,  30,  30,  30,
-         40,  40,  40,  40,  40,  40,  40,  40,
-         50,  50,  50,  50,  50,  50,  50,  50,
-         60,  60,  60,  60,  60,  60,  60,  60,
-         90,  90,  90,  90,  90,  90,  90,  90,
-          0,   0,   0,   0,   0,   0,   0,   0,
-          0,   0,   0,   0,   0,   0,   0,   0,
-    }
+i32 passed_pawn_increase_table[64] = {
+      0,   0,   0,   0,   0,   0,   0,   0,
+      0,   0,   0,   0,   0,   0,   0,   0,
+     90,  90,  90,  90,  90,  90,  90,  90,
+     60,  60,  60,  60,  60,  60,  60,  60,
+     50,  50,  50,  50,  50,  50,  50,  50,
+     40,  40,  40,  40,  40,  40,  40,  40,
+     30,  30,  30,  30,  30,  30,  30,  30,
+      0,   0,   0,   0,   0,   0,   0,   0,
 };
+i32 passed_pawn_increase[CCOLOR_COUNT][64];
 
 
 // https://web.archive.org/web/20071031100051/http://www.brucemo.com/compchess/programming/hashing.htm
@@ -259,14 +250,17 @@ std::atomic<bool> search_stop_requested{false};
 
 void print_search_result(position_t* pos, search_result_t res){
     printf("%3d search result:\n", positions_searched);
-    printf("Checked nodes: %10llu at depth: %3d for %5dms\n", res.nodes, res.depth, res.time_ms);
+    i32 time_ms = res.time_ms <= 0 ? 1 : res.time_ms;
+    double nodes_per_second = ((double)res.nodes / time_ms) * 1000.0;
+    double mn_per_sec = nodes_per_second / 1000000.0;
+    printf("Checked nodes: %10llu at depth: %3d for %5dms at %2.1lf Mn/s\n", res.nodes, res.depth, time_ms, mn_per_sec);
     char best_move_pgn[10] = { 0 };
     write_move_pgn(best_move_pgn, pos, res.move);
     printf("Got best move: %s with score: %d\n", best_move_pgn, res.score);
 }
 
 static force_inline i32 search_time_elapsed_ms(){
-    return (i32)((u64)(clock() - search_state.start_ms) * 1000 / CLOCKS_PER_SEC);
+    return (i32)(((u64)(clock() - search_state.start_ms) * 1000) / CLOCKS_PER_SEC);
 }
 static force_inline void check_stop(){
     if(!search_state.can_stop) return;
@@ -332,10 +326,10 @@ static force_inline void write_tt(u64 hash, move_t move, i32 score, i32 depth, u
 void init_piece_tables(){
     for (piece_t p = PIECE_FROM; p < PIECE_MAX; p++) {
         for (i32 i = 0; i < 64; i++) {
-            piece_values_table_mg[CWHITE][p][i] = piece_values_mg[p] + pesto_tables_mg[p][i];
-            piece_values_table_mg[CBLACK][p][i] = piece_values_mg[p] + pesto_tables_mg[p][whites_as_blacks_index(i)];
-            piece_values_table_eg[CWHITE][p][i] = piece_values_eg[p] + pesto_tables_eg[p][i];
-            piece_values_table_eg[CBLACK][p][i] = piece_values_eg[p] + pesto_tables_eg[p][whites_as_blacks_index(i)];
+            piece_values_table_mg[CWHITE][p][i] = piece_values_mg[p] + pesto_tables_mg[p][whites_index(i)];
+            piece_values_table_mg[CBLACK][p][i] = piece_values_mg[p] + pesto_tables_mg[p][i];
+            piece_values_table_eg[CWHITE][p][i] = piece_values_eg[p] + pesto_tables_eg[p][whites_index(i)];
+            piece_values_table_eg[CBLACK][p][i] = piece_values_eg[p] + pesto_tables_eg[p][i];
         }
     }
 
@@ -370,6 +364,11 @@ void init_piece_tables(){
         passed_pawn_masks[CWHITE][i] = whites_mask;
         passed_pawn_masks[CBLACK][i] = blacks_mask;
     }
+
+    for(i32 i = 0; i < 64; i++){
+        passed_pawn_increase[CWHITE][i] = passed_pawn_increase_table[whites_index(i)];
+        passed_pawn_increase[CBLACK][i] = passed_pawn_increase_table[i];
+    }
 }
 void reset_engine(){
     clear_tt();
@@ -396,7 +395,7 @@ static inline i32 evaluate_relative(position_t* pos) {
         while(mask){
             i32 index = extract_piece(&mask);
             i32 passed_pawn = (i32)!(passed_pawn_masks[c][index] & other_mask); // no blocking pawns for our pawns
-            mg[c] += piece_values_table_mg[c][PAWN][index] + passed_pawn * passed_pawn_increase[c][index];
+            mg[c] += piece_values_table_mg[c][PAWN][index];
             eg[c] += piece_values_table_eg[c][PAWN][index] + passed_pawn * passed_pawn_increase[c][index];
             // phase += gamephase_increase[PAWN]; // += 0
         }
@@ -420,22 +419,6 @@ static inline i32 evaluate_relative(position_t* pos) {
     return (mg_score * mg_phase + eg_score * eg_phase) / 24;
 }
 
-// material from whites point of view
-// static inline i32 material_evaluate(position_t* pos) {
-//     u64* pieces = pos->pieces;
-//     u64* colors = pos->colors;
-//     i32 value = 0;
-//     for(i32 i = PIECE_FROM; i < PIECE_MAX; i++){
-//         i32 piece_count = bit_count(pieces[i] & colors[CWHITE]) - bit_count(pieces[i] & colors[CBLACK]);
-//         value += piece_values[i] * piece_count;
-//     }
-//     return value;
-// }
-// material from the point of view of the side to move
-// static inline i32 evaluate_relative(position_t* pos){
-//     i32 value = material_evaluate(pos);
-//     return pos->blacks_turn ? -value : value;
-// }
 
 // captures of valuable pieces by cheap pieces first, queen promotions early, underpromotions last
 // https://www.chessprogramming.org/MVV-LVA
@@ -710,12 +693,13 @@ static search_result_t _search_position(position_t* pos, search_limits_t limits)
             // some moves were aborted but other need to be checked
             if(res.move != 0 && depth > 1){
                 res.depth = depth - 1; // last fully finished depth
-                public_res.store(res);
+            }else{
+                res = public_res.load(); // reset res because it contains incorrect data
             }
             break;
         }
         if(res.score >= MATE_BOUND_VALUE && (MATE_VALUE - res.score <= depth)) break; // found shortest mate (it fits in depth (that iteratively increases))
-        if(moves_count == 1 && limits.max_time_ms) break; // 1 move, so dont think if dont need to
+        // if(moves_count == 1 && limits.max_time_ms) break; // 1 move, so dont think if dont need to (incorrect position score if we break here)
 
         // set best move first for next iterations
         move_t tmp = moves[0];
@@ -756,6 +740,7 @@ void start_search(position_t* pos, search_limits_t limits){
         search_result_t res = _search_position(&local_pos, limits);
         public_res.store(res);
         search_running.store(false);
+        print_search_result(&local_pos, res);
     });
 }
 
